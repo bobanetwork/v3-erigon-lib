@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/crypto"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/rlp"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type TxParseConfig struct {
@@ -102,6 +103,7 @@ const (
 	AccessListTxType int = 1
 	DynamicFeeTxType int = 2
 	StarknetTxType   int = 3
+	DepositTxType    int = 0x7e
 )
 
 var ErrParseTxn = fmt.Errorf("%w transaction", rlp.ErrParse)
@@ -148,6 +150,12 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 
 	p = dataPos
 
+	log.Debug("MMDBG erigon-lib ParseTransaction", "legacy", legacy, "dataPos", p, "dataLen", dataLen, "payload", payload)
+
+	if !legacy && (dataPos == 0) && (int(payload[0]) == DepositTxType) {
+		log.Debug("MMDBG erigon-lib parsing as DepositTxType", "ctx", ctx, "slot", slot)
+	}
+
 	var txType int
 	// If it is non-legacy transaction, the transaction type follows, and then the the list
 	if !legacy {
@@ -186,7 +194,12 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 
 	// Remember where signing hash data begins (it will need to be wrapped in an RLP list)
 	sigHashPos := p
-	if !legacy {
+       
+       if txType == DepositTxType {
+	       log.Warn("MMDBG erigon-lib override ChainID")
+	       cID := uint256.Int{901}
+	       ctx.ChainID.Set(&cID) // FIXME
+       } else if !legacy {
 		p, err = rlp.U256(payload, p, &ctx.ChainID)
 		if err != nil {
 			return 0, fmt.Errorf("%w: chainId len: %s", ErrParseTxn, err)
@@ -201,49 +214,64 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 			return 0, fmt.Errorf("%w: %s, %d (expected %d)", ErrParseTxn, "invalid chainID", ctx.ChainID.Uint64(), ctx.cfg.ChainID.Uint64())
 		}
 	}
-	// Next follows the nonce, which we need to parse
-	p, slot.Nonce, err = rlp.U64(payload, p)
-	if err != nil {
-		return 0, fmt.Errorf("%w: nonce: %s", ErrParseTxn, err)
-	}
-	// Next follows gas price or tip
-	// Although consensus rules specify that tip can be up to 256 bit long, we narrow it to 64 bit
-	p, err = rlp.U256(payload, p, &slot.Tip)
-	if err != nil {
-		return 0, fmt.Errorf("%w: tip: %s", ErrParseTxn, err)
-	}
-	// Next follows feeCap, but only for dynamic fee transactions, for legacy transaction, it is
-	// equal to tip
-	if txType < DynamicFeeTxType {
-		slot.FeeCap = slot.Tip.Uint64()
-	} else {
-		// Although consensus rules specify that feeCap can be up to 256 bit long, we narrow it to 64 bit
-		p, slot.FeeCap, err = rlp.U64(payload, p)
-		if err != nil {
-			return 0, fmt.Errorf("%w: feeCap: %s", ErrParseTxn, err)
-		}
-	}
-	// Next follows gas
-	p, slot.Gas, err = rlp.U64(payload, p)
-	if err != nil {
-		return 0, fmt.Errorf("%w: gas: %s", ErrParseTxn, err)
-	}
-	// Next follows the destination address (if present)
-	dataPos, dataLen, err = rlp.String(payload, p)
-	if err != nil {
-		return 0, fmt.Errorf("%w: to len: %s", ErrParseTxn, err)
-	}
-	if dataLen != 0 && dataLen != 20 {
-		return 0, fmt.Errorf("%w: unexpected length of to field: %d", ErrParseTxn, dataLen)
-	}
+	if txType == DepositTxType {
+		slot.Nonce = 0xffff_ffff_ffff_fffd
+		slot.FeeCap = 0
 
-	// Only note if To field is empty or not
-	slot.Creation = dataLen == 0
-	p = dataPos + dataLen
-	// Next follows value
-	p, err = rlp.U256(payload, p, &slot.Value)
-	if err != nil {
-		return 0, fmt.Errorf("%w: value: %s", ErrParseTxn, err)
+		dataPos, dataLen, err = rlp.String(payload, p) // SourceHash
+		p = dataPos + dataLen
+		dataPos, dataLen, err = rlp.String(payload, p) // From
+		p = dataPos + dataLen
+		dataPos, dataLen, err = rlp.String(payload, p) // To
+		p = dataPos + dataLen
+		dataPos, dataLen, err = rlp.String(payload, p) // Mint
+		p = dataPos + dataLen
+		dataPos, dataLen, err = rlp.String(payload, p) // Value
+		p = dataPos + dataLen
+
+		p, slot.Gas, err = rlp.U64(payload, p)
+		if err != nil {
+			return 0, fmt.Errorf("%w: d_gas: %s", ErrParseTxn, err)
+		}
+
+		p += 1 // SystemTx   
+	} else {
+		// Next follows the nonce, which we need to parse
+		p, slot.Nonce, err = rlp.U64(payload, p)
+		if err != nil {
+			return 0, fmt.Errorf("%w: nonce: %s", ErrParseTxn, err)
+		}
+		// Next follows gas price or tip
+		// Although consensus rules specify that tip can be up to 256 bit long, we narrow it to 64 bit
+		p, err = rlp.U256(payload, p, &slot.Tip)
+		if err != nil {
+			return 0, fmt.Errorf("%w: tip: %s", ErrParseTxn, err)
+		}
+		// Next follows feeCap, but only for dynamic fee transactions, for legacy transaction, it is
+		// equal to tip
+		if txType < DynamicFeeTxType {
+			slot.FeeCap = slot.Tip.Uint64()
+			if err != nil {
+				return 0, fmt.Errorf("%w: feeCap: %s", ErrParseTxn, err)
+			}
+		}
+		// Next follows the destination address (if present)
+		dataPos, dataLen, err = rlp.String(payload, p)
+		if err != nil {
+			return 0, fmt.Errorf("%w: to len: %s", ErrParseTxn, err)
+		}
+		if dataLen != 0 && dataLen != 20 {
+			return 0, fmt.Errorf("%w: unexpected length of to field: %d", ErrParseTxn, dataLen)
+		}
+
+		// Only note if To field is empty or not
+		slot.Creation = dataLen == 0
+		p = dataPos + dataLen
+		// Next follows value
+		p, err = rlp.U256(payload, p, &slot.Value)
+		if err != nil {
+			return 0, fmt.Errorf("%w: value: %s", ErrParseTxn, err)
+		}
 	}
 	// Next goes data, but we are only interesting in its length
 	dataPos, dataLen, err = rlp.String(payload, p)
@@ -261,7 +289,11 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	}
 
 	p = dataPos + dataLen
-
+	
+	if txType == DepositTxType {
+		log.Debug("MMDBG erigon-lib finished parsing DepositTxType")
+		return p,nil
+	}
 	// Next goes starknet tx salt, but we are only interesting in its length
 	if txType == StarknetTxType {
 		dataPos, dataLen, err = rlp.String(payload, p)
