@@ -251,10 +251,17 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		// equal to tip
 		if txType < DynamicFeeTxType {
 			slot.FeeCap = slot.Tip.Uint64()
+		} else {
+			p, slot.FeeCap, err = rlp.U64(payload, p)
 			if err != nil {
 				return 0, fmt.Errorf("%w: feeCap: %s", ErrParseTxn, err)
 			}
 		}
+		p, slot.Gas, err = rlp.U64(payload, p)
+		if err != nil {
+			return 0, fmt.Errorf("%w: gas %s", ErrParseTxn, err)
+		}
+
 		// Next follows the destination address (if present)
 		dataPos, dataLen, err = rlp.String(payload, p)
 		if err != nil {
