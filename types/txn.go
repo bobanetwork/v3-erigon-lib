@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/rlp"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 )
 
 type TxParseConfig struct {
@@ -150,7 +151,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 
 	p = dataPos
 
-	log.Debug("MMDBG erigon-lib ParseTransaction", "legacy", legacy, "dataPos", p, "dataLen", dataLen, "payload", payload)
+	log.Debug("MMDBG erigon-lib ParseTransaction", "legacy", legacy, "dataPos", p, "dataLen", dataLen, "payload", hexutil.Bytes(payload))
 
 	if !legacy && (dataPos == 0) && (int(payload[0]) == DepositTxType) {
 		log.Debug("MMDBG erigon-lib parsing as DepositTxType", "ctx", ctx, "slot", slot)
