@@ -40,6 +40,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spaolacci/murmur3"
 	"golang.org/x/crypto/sha3"
@@ -570,15 +571,13 @@ func buildIndex(d *compress.Decompressor, idxPath, tmpDir string, count int) (*r
 	var rs *recsplit.RecSplit
 	var err error
 	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   count,
-		Enums:      false,
-		BucketSize: 2000,
-		LeafSize:   8,
-		TmpDir:     tmpDir,
-		StartSeed: []uint64{0x106393c187cae21a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
-			0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
-			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a},
-		IndexFile: idxPath,
+		KeyCount:    count,
+		Enums:       false,
+		BucketSize:  2000,
+		LeafSize:    8,
+		TmpDir:      tmpDir,
+		IndexFile:   idxPath,
+		EtlBufLimit: etl.BufferOptimalSize / 2,
 	}); err != nil {
 		return nil, err
 	}
@@ -950,7 +949,7 @@ func (a *Aggregator) scanStateFiles(files []fs.DirEntry) {
 	for fType := FileType(0); fType < NumberOfTypes; fType++ {
 		typeStrings[fType] = fType.String()
 	}
-	re := regexp.MustCompile("(" + strings.Join(typeStrings, "|") + ").([0-9]+)-([0-9]+).(dat|idx)")
+	re := regexp.MustCompile("^(" + strings.Join(typeStrings, "|") + ").([0-9]+)-([0-9]+).(dat|idx)$")
 	var err error
 	for _, f := range files {
 		name := f.Name()
@@ -1041,7 +1040,7 @@ func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64, c
 		}
 	}
 	a.changesBtree = btree.New(32)
-	re := regexp.MustCompile(`(account|storage|code|commitment).(keys|before|after).([0-9]+)-([0-9]+).chg`)
+	re := regexp.MustCompile(`^(account|storage|code|commitment).(keys|before|after).([0-9]+)-([0-9]+).chg$`)
 	for _, f := range files {
 		name := f.Name()
 		subs := re.FindStringSubmatch(name)
@@ -1616,10 +1615,7 @@ func (a *Aggregator) reduceHistoryFiles(fType FileType, item *byEndBlockItem) er
 		BucketSize: 2000,
 		LeafSize:   8,
 		TmpDir:     a.diffDir,
-		StartSeed: []uint64{0x106393c187cae21a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
-			0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
-			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a},
-		IndexFile: idxPath,
+		IndexFile:  idxPath,
 	}); err != nil {
 		return fmt.Errorf("reduceHistoryFiles NewRecSplit: %w", err)
 	}
@@ -2185,6 +2181,7 @@ func (w *Writer) Reset(blockNum uint64, tx kv.RwTx) error {
 type CommitmentItem struct {
 	plainKey  []byte
 	hashedKey []byte
+	u         commitment.Update
 }
 
 func commitmentItemLess(i, j *CommitmentItem) bool {
@@ -2341,6 +2338,29 @@ func (w *Writer) captureCommitmentData(trace bool) {
 			c.hashedKey[i*2] = (b >> 4) & 0xf
 			c.hashedKey[i*2+1] = b & 0xf
 		}
+		c.u.Flags = commitment.CODE_UPDATE
+		item, found := commTree.Get(&CommitmentItem{hashedKey: c.hashedKey})
+		if found && item != nil {
+			if item.u.Flags&commitment.BALANCE_UPDATE != 0 {
+				c.u.Flags |= commitment.BALANCE_UPDATE
+				c.u.Balance.Set(&item.u.Balance)
+			}
+			if item.u.Flags&commitment.NONCE_UPDATE != 0 {
+				c.u.Flags |= commitment.NONCE_UPDATE
+				c.u.Nonce = item.u.Nonce
+			}
+			if item.u.Flags == commitment.DELETE_UPDATE && len(val) == 0 {
+				c.u.Flags = commitment.DELETE_UPDATE
+			} else {
+				h.Reset()
+				h.Write(val)
+				h.(io.Reader).Read(c.u.CodeHashOrStorage[:])
+			}
+		} else {
+			h.Reset()
+			h.Write(val)
+			h.(io.Reader).Read(c.u.CodeHashOrStorage[:])
+		}
 		commTree.ReplaceOrInsert(c)
 	})
 	w.captureCommitmentType(Account, trace, func(commTree *btree.BTreeG[*CommitmentItem], h hash.Hash, key, val []byte) {
@@ -2351,6 +2371,20 @@ func (w *Writer) captureCommitmentData(trace bool) {
 		for i, b := range hashedKey {
 			c.hashedKey[i*2] = (b >> 4) & 0xf
 			c.hashedKey[i*2+1] = b & 0xf
+		}
+		if len(val) == 0 {
+			c.u.Flags = commitment.DELETE_UPDATE
+		} else {
+			c.u.DecodeForStorage(val)
+			c.u.Flags = commitment.BALANCE_UPDATE | commitment.NONCE_UPDATE
+			item, found := commTree.Get(&CommitmentItem{hashedKey: c.hashedKey})
+
+			if found && item != nil {
+				if item.u.Flags&commitment.CODE_UPDATE != 0 {
+					c.u.Flags |= commitment.CODE_UPDATE
+					copy(c.u.CodeHashOrStorage[:], item.u.CodeHashOrStorage[:])
+				}
+			}
 		}
 		commTree.ReplaceOrInsert(c)
 	})
@@ -2366,6 +2400,15 @@ func (w *Writer) captureCommitmentData(trace bool) {
 		for i, b := range hashedKey {
 			c.hashedKey[i*2] = (b >> 4) & 0xf
 			c.hashedKey[i*2+1] = b & 0xf
+		}
+		c.u.ValLength = len(val)
+		if len(val) > 0 {
+			copy(c.u.CodeHashOrStorage[:], val)
+		}
+		if len(val) == 0 {
+			c.u.Flags = commitment.DELETE_UPDATE
+		} else {
+			c.u.Flags = commitment.STORAGE_UPDATE
 		}
 		commTree.ReplaceOrInsert(c)
 	})
@@ -2387,10 +2430,12 @@ func (w *Writer) computeCommitment(trace bool) ([]byte, error) {
 
 	plainKeys := make([][]byte, w.commTree.Len())
 	hashedKeys := make([][]byte, w.commTree.Len())
+	updates := make([]commitment.Update, w.commTree.Len())
 	j := 0
 	w.commTree.Ascend(func(item *CommitmentItem) bool {
 		plainKeys[j] = item.plainKey
 		hashedKeys[j] = item.hashedKey
+		updates[j] = item.u
 		j++
 		return true
 	})
@@ -2403,7 +2448,7 @@ func (w *Writer) computeCommitment(trace bool) ([]byte, error) {
 	w.a.hph.ResetFns(w.branchFn, w.accountFn, w.storageFn)
 	w.a.hph.SetTrace(trace)
 
-	rootHash, branchNodeUpdates, err := w.a.hph.ReviewKeys(plainKeys, hashedKeys)
+	rootHash, branchNodeUpdates, err := w.a.hph.ProcessUpdates(plainKeys, hashedKeys, updates)
 	if err != nil {
 		return nil, err
 	}

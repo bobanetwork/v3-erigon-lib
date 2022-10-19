@@ -33,8 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
-const TmpDirName = "etl-temp"
-
 type LoadNextFunc func(originalK, k, v []byte) error
 type LoadFunc func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error
 
@@ -101,7 +99,7 @@ func NewCollector(logPrefix, tmpdir string, sortableBuffer Buffer) *Collector {
 			c.allFlushed = true
 		} else {
 			doFsync := !c.autoClean /* is critical collector */
-			provider, err = FlushToDisk(sortableBuffer, tmpdir, doFsync, c.logLvl)
+			provider, err = FlushToDisk(logPrefix, sortableBuffer, tmpdir, doFsync, c.logLvl)
 		}
 		if err != nil {
 			return err

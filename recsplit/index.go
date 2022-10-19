@@ -23,6 +23,7 @@ import (
 	"math"
 	"math/bits"
 	"os"
+	"path/filepath"
 	"unsafe"
 
 	"github.com/ledgerwatch/erigon-lib/mmap"
@@ -88,6 +89,10 @@ func OpenIndex(indexFile string) (*Index, error) {
 	idx.bytesPerRec = int(idx.data[16])
 	idx.recMask = (uint64(1) << (8 * idx.bytesPerRec)) - 1
 	offset := 16 + 1 + int(idx.keyCount)*idx.bytesPerRec
+
+	if offset < 0 {
+		return nil, fmt.Errorf("offset is: %d which is below zero, the file: %s is broken", offset, indexFile)
+	}
 
 	// Bucket count, bucketSize, leafSize
 	idx.bucketCount = binary.BigEndian.Uint64(idx.data[offset:])
@@ -184,7 +189,8 @@ func (idx *Index) KeyCount() uint64 {
 // Lookup is not thread-safe because it used id.hasher
 func (idx *Index) Lookup(bucketHash, fingerprint uint64) uint64 {
 	if idx.keyCount == 0 {
-		panic("no Lookup should be done when keyCount==0, please use Empty function to guard")
+		_, fName := filepath.Split(idx.indexFile)
+		panic("no Lookup should be done when keyCount==0, please use Empty function to guard " + fName)
 	}
 	if idx.keyCount == 1 {
 		return 0
@@ -302,4 +308,19 @@ func (idx *Index) RewriteWithOffsets(w *bufio.Writer, m map[uint64]uint64) error
 		return err
 	}
 	return nil
+}
+
+// DisableReadAhead - usage: `defer d.EnableReadAhead().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.
+func (idx *Index) DisableReadAhead() { _ = mmap.MadviseRandom(idx.mmapHandle1) }
+func (idx *Index) EnableReadAhead() *Index {
+	_ = mmap.MadviseSequential(idx.mmapHandle1)
+	return idx
+}
+func (idx *Index) EnableMadvNormal() *Index {
+	_ = mmap.MadviseNormal(idx.mmapHandle1)
+	return idx
+}
+func (idx *Index) EnableWillNeed() *Index {
+	_ = mmap.MadviseWillNeed(idx.mmapHandle1)
+	return idx
 }

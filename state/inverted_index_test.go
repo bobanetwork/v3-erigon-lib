@@ -20,8 +20,11 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"testing"
+	"testing/fstest"
 
+	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
@@ -55,6 +58,8 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	ii.SetTx(tx)
+	ii.StartWrites("")
+	defer ii.FinishWrites()
 
 	ii.SetTxNum(2)
 	err = ii.Add([]byte("key1"))
@@ -70,6 +75,8 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	err = ii.Add([]byte("key3"))
 	require.NoError(t, err)
 
+	err = ii.Flush()
+	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
 
@@ -126,6 +133,8 @@ func TestInvIndexAfterPrune(t *testing.T) {
 		}
 	}()
 	ii.SetTx(tx)
+	ii.StartWrites("")
+	defer ii.FinishWrites()
 
 	ii.SetTxNum(2)
 	err = ii.Add([]byte("key1"))
@@ -141,6 +150,8 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	err = ii.Add([]byte("key3"))
 	require.NoError(t, err)
 
+	err = ii.Flush()
+	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
 
@@ -161,7 +172,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 
 	ii.integrateFiles(sf, 0, 16)
 
-	err = ii.prune(0, 16)
+	err = ii.prune(0, 16, math.MaxUint64)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -192,6 +203,9 @@ func filledInvIndex(t *testing.T) (string, kv.RwDB, *InvertedIndex, uint64) {
 		}
 	}()
 	ii.SetTx(tx)
+	ii.StartWrites("")
+	defer ii.FinishWrites()
+
 	txs := uint64(1000)
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
@@ -206,6 +220,8 @@ func filledInvIndex(t *testing.T) (string, kv.RwDB, *InvertedIndex, uint64) {
 			}
 		}
 		if txNum%10 == 0 {
+			err = ii.Flush()
+			require.NoError(t, err)
 			err = tx.Commit()
 			require.NoError(t, err)
 			tx, err = db.BeginRw(context.Background())
@@ -213,6 +229,8 @@ func filledInvIndex(t *testing.T) (string, kv.RwDB, *InvertedIndex, uint64) {
 			ii.SetTx(tx)
 		}
 	}
+	err = ii.Flush()
+	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
 	return path, db, ii, txs
@@ -278,7 +296,7 @@ func mergeInverted(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			tx, err = db.BeginRw(context.Background())
 			require.NoError(t, err)
 			ii.SetTx(tx)
-			err = ii.prune(step*ii.aggregationStep, (step+1)*ii.aggregationStep)
+			err = ii.prune(step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64)
 			require.NoError(t, err)
 			err = tx.Commit()
 			require.NoError(t, err)
@@ -324,7 +342,7 @@ func TestInvIndexRanges(t *testing.T) {
 			tx, err = db.BeginRw(context.Background())
 			require.NoError(t, err)
 			ii.SetTx(tx)
-			err = ii.prune(step*ii.aggregationStep, (step+1)*ii.aggregationStep)
+			err = ii.prune(step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64)
 			require.NoError(t, err)
 			err = tx.Commit()
 			require.NoError(t, err)
@@ -419,4 +437,29 @@ func TestChangedKeysIterator(t *testing.T) {
 		"000000000000000c",
 		"000000000000001b",
 	}, keys)
+}
+
+func TestScanStaticFiles(t *testing.T) {
+	ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1,
+		files: btree.NewG[*filesItem](32, filesItemLess),
+	}
+	ffs := fstest.MapFS{
+		"test.0-1.ef": {},
+		"test.1-2.ef": {},
+		"test.0-4.ef": {},
+		"test.2-3.ef": {},
+		"test.3-4.ef": {},
+		"test.4-5.ef": {},
+	}
+	files, err := ffs.ReadDir(".")
+	require.NoError(t, err)
+	ii.scanStateFiles(files)
+	var found []string
+	ii.files.Ascend(func(i *filesItem) bool {
+		found = append(found, fmt.Sprintf("%d-%d", i.startTxNum, i.endTxNum))
+		return true
+	})
+	require.Equal(t, 2, len(found))
+	require.Equal(t, "0-4", found[0])
+	require.Equal(t, "4-5", found[1])
 }

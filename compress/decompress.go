@@ -22,8 +22,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/mmap"
 )
@@ -186,7 +184,6 @@ func NewDecompressor(compressedFile string) (*Decompressor, error) {
 	d.emptyWordsCount = binary.BigEndian.Uint64(d.data[8:16])
 	dictSize := binary.BigEndian.Uint64(d.data[16:24])
 	data := d.data[24 : 24+dictSize]
-	log.Debug("decompress dictionary", "size", dictSize)
 
 	var depths []uint64
 	var patterns [][]byte
@@ -226,7 +223,6 @@ func NewDecompressor(compressedFile string) (*Decompressor, error) {
 	pos := 24 + dictSize
 	dictSize = binary.BigEndian.Uint64(d.data[pos : pos+8])
 	data = d.data[pos+8 : pos+8+dictSize]
-	log.Debug("decompress positions dictionary", "size", dictSize)
 
 	var posDepths []uint64
 	var poss []uint64
@@ -365,8 +361,24 @@ func (d *Decompressor) FilePath() string { return d.compressedFile }
 // WithReadAhead - Expect read in sequential order. (Hence, pages in the given range can be aggressively read ahead, and may be freed soon after they are accessed.)
 func (d *Decompressor) WithReadAhead(f func() error) error {
 	_ = mmap.MadviseSequential(d.mmapHandle1)
+	//_ = mmap.MadviseWillNeed(d.mmapHandle1)
 	defer mmap.MadviseRandom(d.mmapHandle1)
 	return f()
+}
+
+// DisableReadAhead - usage: `defer d.EnableReadAhead().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.
+func (d *Decompressor) DisableReadAhead() { _ = mmap.MadviseRandom(d.mmapHandle1) }
+func (d *Decompressor) EnableReadAhead() *Decompressor {
+	_ = mmap.MadviseSequential(d.mmapHandle1)
+	return d
+}
+func (d *Decompressor) EnableMadvNormal() *Decompressor {
+	_ = mmap.MadviseNormal(d.mmapHandle1)
+	return d
+}
+func (d *Decompressor) EnableWillNeed() *Decompressor {
+	_ = mmap.MadviseWillNeed(d.mmapHandle1)
+	return d
 }
 
 // Getter represent "reader" or "interator" that can move accross the data of the decompressor
