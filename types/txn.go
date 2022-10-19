@@ -218,7 +218,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 
 	if txType == DepositTxType {
 		slot.Nonce = 0xffff_ffff_ffff_fffd
-		slot.FeeCap = 0
+		slot.FeeCap = *new(uint256.Int)
 
 		dataPos, dataLen, err = rlp.String(payload, p) // SourceHash
 		p = dataPos + dataLen
