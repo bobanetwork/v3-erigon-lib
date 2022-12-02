@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"fmt"
 	"reflect"
-	"runtime"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -64,17 +63,15 @@ type LoadCommitHandler func(db kv.Putter, key []byte, isDone bool) error
 type AdditionalLogArguments func(k, v []byte) (additionalLogArguments []interface{})
 
 type TransformArgs struct {
+	Quit              <-chan struct{}
+	LogDetailsExtract AdditionalLogArguments
+	LogDetailsLoad    AdditionalLogArguments
+	Comparator        kv.CmpFunc
 	// [ExtractStartKey, ExtractEndKey)
 	ExtractStartKey []byte
 	ExtractEndKey   []byte
 	BufferType      int
 	BufferSize      int
-	Quit            <-chan struct{}
-
-	LogDetailsExtract AdditionalLogArguments
-	LogDetailsLoad    AdditionalLogArguments
-
-	Comparator kv.CmpFunc
 }
 
 func Transform(
@@ -121,7 +118,6 @@ func extractBucketIntoFiles(
 ) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	var m runtime.MemStats
 
 	c, err := db.Cursor(bucket)
 	if err != nil {
@@ -145,8 +141,6 @@ func extractBucketIntoFiles(
 				logArs = append(logArs, "current key", makeCurrentKeyStr(k))
 			}
 
-			common.ReadMemStats(&m)
-			logArs = append(logArs, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), logArs...)
 		}
 		if endkey != nil && bytes.Compare(k, endkey) >= 0 {

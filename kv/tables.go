@@ -418,6 +418,18 @@ const (
 	XAccount = "XAccount"
 	XStorage = "XStorage"
 	XCode    = "XCode"
+
+	// Erigon-CL
+	BeaconState = "BeaconState"
+	// [slot + block root] => [signature + block without execution payload]
+	BeaconBlocks = "BeaconBlock"
+
+	// LightClientStore => LightClientStore object
+	// LightClientFinalityUpdate => latest finality update
+	// LightClientOptimisticUpdate => latest optimistic update
+	LightClient = "LightClient"
+	// Period (one every 27 hours) => LightClientUpdate
+	LightClientUpdates = "LightClientUpdates"
 )
 
 // Keys
@@ -444,6 +456,11 @@ var (
 	CurrentHeadersSnapshotBlock = []byte("CurrentHeadersSnapshotBlock")
 	CurrentBodiesSnapshotHash   = []byte("CurrentBodiesSnapshotHash")
 	CurrentBodiesSnapshotBlock  = []byte("CurrentBodiesSnapshotBlock")
+	PlainStateVersion           = []byte("PlainStateVersion")
+
+	LightClientStore            = []byte("LightClientStore")
+	LightClientFinalityUpdate   = []byte("LightClientFinalityUpdate")
+	LightClientOptimisticUpdate = []byte("LightClientOptimisticUpdate")
 )
 
 // ChaindataTables - list of all buckets. App will panic if some bucket is not in this list.
@@ -555,6 +572,11 @@ var ChaindataTables = []string{
 
 	VerkleRoots,
 	VerkleTrie,
+
+	BeaconState,
+	BeaconBlocks,
+	LightClient,
+	LightClientUpdates,
 }
 
 const (

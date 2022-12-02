@@ -27,7 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 )
 
-func TestEmptyState(t *testing.T) {
+func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	ms := NewMockState(t)
 	hph := NewHexPatriciaHashed(1, ms.branchFn, ms.accountFn, ms.storageFn)
 	hph.SetTrace(false)
@@ -48,10 +48,10 @@ func TestEmptyState(t *testing.T) {
 	err := ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	rootHash, branchNodeUpdates, err := hph.ReviewKeys(plainKeys, hashedKeys)
+	firstRootHash, branchNodeUpdates, err := hph.ReviewKeys(plainKeys, hashedKeys)
 	require.NoError(t, err)
 
-	t.Logf("root hash %x\n", rootHash)
+	t.Logf("root hash %x\n", firstRootHash)
 
 	ms.applyBranchNodeUpdates(branchNodeUpdates)
 
@@ -64,15 +64,15 @@ func TestEmptyState(t *testing.T) {
 	plainKeys, hashedKeys, updates = NewUpdateBuilder().
 		Storage("03", "58", "050505").
 		Build()
-	if err := ms.applyPlainUpdates(plainKeys, updates); err != nil {
-		t.Fatal(err)
-	}
-	_, branchNodeUpdates, err = hph.ReviewKeys(plainKeys, hashedKeys)
-	if err != nil {
-		t.Fatal(err)
-	}
+	err = ms.applyPlainUpdates(plainKeys, updates)
+	require.NoError(t, err)
+
+	secondRootHash, branchNodeUpdates, err := hph.ReviewKeys(plainKeys, hashedKeys)
+	require.NoError(t, err)
+	require.NotEqualValues(t, firstRootHash, secondRootHash)
+
 	ms.applyBranchNodeUpdates(branchNodeUpdates)
-	fmt.Printf("2. Generated updates\n")
+	fmt.Printf("2. Generated single update\n")
 	renderUpdates(branchNodeUpdates)
 
 	// More updates
@@ -81,18 +81,19 @@ func TestEmptyState(t *testing.T) {
 	plainKeys, hashedKeys, updates = NewUpdateBuilder().
 		Storage("03", "58", "070807").
 		Build()
-	if err := ms.applyPlainUpdates(plainKeys, updates); err != nil {
-		t.Fatal(err)
-	}
-	_, branchNodeUpdates, err = hph.ReviewKeys(plainKeys, hashedKeys)
+	err = ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
+	thirdRootHash, branchNodeUpdates, err := hph.ReviewKeys(plainKeys, hashedKeys)
+	require.NoError(t, err)
+	require.NotEqualValues(t, secondRootHash, thirdRootHash)
+
 	ms.applyBranchNodeUpdates(branchNodeUpdates)
-	fmt.Printf("3. Generated updates\n")
+	fmt.Printf("3. Generated single update\n")
 	renderUpdates(branchNodeUpdates)
 }
 
-func Test_HexPatriciaHashed_EmptyUpdateState(t *testing.T) {
+func Test_HexPatriciaHashed_EmptyUpdate(t *testing.T) {
 	ms := NewMockState(t)
 	hph := NewHexPatriciaHashed(1, ms.branchFn, ms.accountFn, ms.storageFn)
 	hph.SetTrace(false)
@@ -135,7 +136,7 @@ func Test_HexPatriciaHashed_EmptyUpdateState(t *testing.T) {
 	require.EqualValues(t, hashBeforeEmptyUpdate, hashAfterEmptyUpdate)
 }
 
-func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation(t *testing.T) {
+func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 	ms := NewMockState(t)
 	ms2 := NewMockState(t)
 
@@ -206,14 +207,14 @@ func Test_Sepolia(t *testing.T) {
 	ms := NewMockState(t)
 
 	type TestData struct {
-		expectedRoot string
 		balances     map[string][]byte
+		expectedRoot string
 	}
 
 	tests := []TestData{
 		{
-			"5eb6e371a698b8d68f665192350ffcecbbbf322916f4b51bd79bb6887da3f494",
-			map[string][]byte{
+			expectedRoot: "5eb6e371a698b8d68f665192350ffcecbbbf322916f4b51bd79bb6887da3f494",
+			balances: map[string][]byte{
 				"a2a6d93439144ffe4d27c9e088dcd8b783946263": {0xd3, 0xc2, 0x1b, 0xce, 0xcc, 0xed, 0xa1, 0x00, 0x00, 0x00},
 				"bc11295936aa79d594139de1b2e12629414f3bdb": {0xd3, 0xc2, 0x1b, 0xce, 0xcc, 0xed, 0xa1, 0x00, 0x00, 0x00},
 				"7cf5b79bfe291a67ab02b393e456ccc4c266f753": {0xd3, 0xc2, 0x1b, 0xce, 0xcc, 0xed, 0xa1, 0x00, 0x00, 0x00},
@@ -232,14 +233,14 @@ func Test_Sepolia(t *testing.T) {
 			},
 		},
 		{
-			"c91d4ecd59dce3067d340b3aadfc0542974b4fb4db98af39f980a91ea00db9dc",
-			map[string][]byte{
+			expectedRoot: "c91d4ecd59dce3067d340b3aadfc0542974b4fb4db98af39f980a91ea00db9dc",
+			balances: map[string][]byte{
 				"2f14582947e292a2ecd20c430b46f2d27cfe213c": {0x1B, 0xC1, 0x6D, 0x67, 0x4E, 0xC8, 0x00, 0x00},
 			},
 		},
 		{
-			"c91d4ecd59dce3067d340b3aadfc0542974b4fb4db98af39f980a91ea00db9dc",
-			map[string][]byte{},
+			expectedRoot: "c91d4ecd59dce3067d340b3aadfc0542974b4fb4db98af39f980a91ea00db9dc",
+			balances:     map[string][]byte{},
 		},
 	}
 

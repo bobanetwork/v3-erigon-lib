@@ -24,7 +24,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
@@ -41,12 +40,12 @@ type LoadFunc func(k, v []byte, table CurrentTableReader, next LoadNextFunc) err
 type Collector struct {
 	extractNextFunc ExtractNextFunc
 	flushBuffer     func([]byte, bool) error
+	logPrefix       string
 	dataProviders   []dataProvider
-	allFlushed      bool
-	autoClean       bool
 	logLvl          log.Lvl
 	bufType         int
-	logPrefix       string
+	allFlushed      bool
+	autoClean       bool
 }
 
 // NewCollectorFromFiles creates collector from existing files (left over from previous unsuccessful loading)
@@ -163,13 +162,12 @@ func (c *Collector) Close() {
 // The subsequent iterations pop the heap again and load up the provider associated with it to get the next element after processing LoadFunc.
 // this continues until all providers have reached their EOF.
 func loadFilesIntoBucket(logPrefix string, db kv.RwTx, bucket string, bufType int, providers []dataProvider, loadFunc LoadFunc, args TransformArgs) error {
-	var m runtime.MemStats
 
 	h := &Heap{comparator: args.Comparator}
 	heap.Init(h)
 	for i, provider := range providers {
 		if key, value, err := provider.Next(nil, nil); err == nil {
-			he := HeapElem{key, i, value}
+			he := HeapElem{key, value, i}
 			heap.Push(h, he)
 		} else /* we must have at least one entry per file */ {
 			eee := fmt.Errorf("%s: error reading first readers: n=%d current=%d provider=%s err=%w",
@@ -231,8 +229,6 @@ func loadFilesIntoBucket(logPrefix string, db kv.RwTx, bucket string, bufType in
 				logArs = append(logArs, "current key", makeCurrentKeyStr(k))
 			}
 
-			common.ReadMemStats(&m)
-			logArs = append(logArs, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			log.Info(fmt.Sprintf("[%s] ETL [2/2] Loading", logPrefix), logArs...)
 		}
 

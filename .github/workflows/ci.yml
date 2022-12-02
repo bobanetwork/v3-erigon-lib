@@ -12,7 +12,8 @@ on:
       - alpha
 env:
   CGO_ENABLED: "1"
-  CGO_CXXFLAGS: "-std=c++17"
+  CGO_CXXFLAGS: "-g -O2 -std=c++17"
+  GO111MODULE: "on"
 jobs:
   tests:
     strategy:
@@ -23,7 +24,7 @@ jobs:
     steps:
       - name: configure Pagefile
         if: matrix.os == 'windows-2022'
-        uses: al-cheb/configure-pagefile-action@v1.2
+        uses: al-cheb/configure-pagefile-action@v1.3
         with:
           minimum-size: 8GB
       - uses: actions/checkout@v3
@@ -44,18 +45,17 @@ jobs:
         shell: bash
       - name: Install deps
         if: matrix.os == 'windows-2022'
-        run: choco upgrade mingw cmake -y --no-progress
+        run: |
+          choco upgrade mingw -y --no-progress --version 11.2.0.07112021
+          choco install cmake -y --no-progress --version 3.23.1
 
       - name: Lint
         if: matrix.os == 'ubuntu-20.04'
         uses: golangci/golangci-lint-action@v3
         with:
-          version: v1.49
+          version: v1.50
           args: --config=.golangci.yml --out-${NO_FUTURE}format colored-line-number
 
       - name: Test win
         if: matrix.os == 'windows-2022'
-        run: go test --tags nofuzz --count 1 -p 2 ./...
-      - name: Test
-        if: matrix.os != 'windows-2022'
-        run: go test --count 1 -p 2 ./...
+        run: make test-no-fuzz
