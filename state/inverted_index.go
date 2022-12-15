@@ -28,7 +28,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -87,17 +86,19 @@ func NewInvertedIndex(
 	if err != nil {
 		return nil, fmt.Errorf("NewInvertedIndex: %s, %w", filenameBase, err)
 	}
-	ii.scanStateFiles(files)
+	uselessFiles := ii.scanStateFiles(files)
+	for _, f := range uselessFiles {
+		_ = os.Remove(filepath.Join(ii.dir, f))
+	}
 	if err = ii.openFiles(); err != nil {
 		return nil, fmt.Errorf("NewInvertedIndex: %s, %w", filenameBase, err)
 	}
 	return &ii, nil
 }
 
-func (ii *InvertedIndex) scanStateFiles(files []fs.DirEntry) {
+func (ii *InvertedIndex) scanStateFiles(files []fs.DirEntry) (uselessFiles []string) {
 	re := regexp.MustCompile("^" + ii.filenameBase + ".([0-9]+)-([0-9]+).ef$")
 	var err error
-	var uselessFiles []string
 	for _, f := range files {
 		if !f.Type().IsRegular() {
 			continue
@@ -179,9 +180,7 @@ func (ii *InvertedIndex) scanStateFiles(files []fs.DirEntry) {
 		}
 		ii.files.ReplaceOrInsert(item)
 	}
-	if len(uselessFiles) > 0 {
-		log.Info("[snapshots] history can delete", "files", strings.Join(uselessFiles, ","))
-	}
+	return uselessFiles
 }
 
 func (ii *InvertedIndex) missedIdxFiles() (l []*filesItem) {
@@ -329,7 +328,7 @@ func (ii *InvertedIndex) DiscardHistory(tmpdir string) {
 func (ii *InvertedIndex) StartWrites(tmpdir string) {
 	ii.walLock.Lock()
 	defer ii.walLock.Unlock()
-	ii.wal = ii.newWriter(tmpdir, true, false)
+	ii.wal = ii.newWriter(tmpdir, WALCollectorRam > 0, false)
 }
 func (ii *InvertedIndex) FinishWrites() {
 	ii.walLock.Lock()
@@ -938,12 +937,6 @@ func (ii *InvertedIndex) warmup(txFrom, limit uint64, tx kv.Tx) error {
 
 // [txFrom; txTo)
 func (ii *InvertedIndex) prune(ctx context.Context, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
-	select {
-	case <-ctx.Done():
-		return nil
-	default:
-	}
-
 	keysCursor, err := ii.tx.RwCursorDupSort(ii.indexKeysTable)
 	if err != nil {
 		return fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
@@ -984,6 +977,8 @@ func (ii *InvertedIndex) prune(ctx context.Context, txFrom, txTo, limit uint64, 
 			return err
 		}
 		select {
+		case <-ctx.Done():
+			return nil
 		case <-logEvery.C:
 			log.Info("[snapshots] prune history", "name", ii.filenameBase, "range", fmt.Sprintf("%.2f-%.2f", float64(txNum)/float64(ii.aggregationStep), float64(txTo)/float64(ii.aggregationStep)))
 		default:

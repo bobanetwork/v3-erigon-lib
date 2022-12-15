@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/semaphore"
@@ -278,7 +279,7 @@ func (a *Aggregator22) buildFiles(ctx context.Context, step uint64, txFrom, txTo
 	}()
 	//var wg sync.WaitGroup
 	//wg.Add(7)
-	errCh := make(chan error, 7)
+	//errCh := make(chan error, 7)
 	//go func() {
 	//	defer wg.Done()
 	var err error
@@ -286,11 +287,13 @@ func (a *Aggregator22) buildFiles(ctx context.Context, step uint64, txFrom, txTo
 		ac.accounts, err = a.accounts.collate(step, txFrom, txTo, tx, logEvery)
 		return err
 	}); err != nil {
-		errCh <- err
+		return sf, err
+		//errCh <- err
 	}
 
 	if sf.accounts, err = a.accounts.buildFiles(ctx, step, ac.accounts); err != nil {
-		errCh <- err
+		return sf, err
+		//errCh <- err
 	}
 	//}()
 	//
@@ -301,11 +304,13 @@ func (a *Aggregator22) buildFiles(ctx context.Context, step uint64, txFrom, txTo
 		ac.storage, err = a.storage.collate(step, txFrom, txTo, tx, logEvery)
 		return err
 	}); err != nil {
-		errCh <- err
+		return sf, err
+		//errCh <- err
 	}
 
 	if sf.storage, err = a.storage.buildFiles(ctx, step, ac.storage); err != nil {
-		errCh <- err
+		return sf, err
+		//errCh <- err
 	}
 	//}()
 	//go func() {
@@ -315,11 +320,13 @@ func (a *Aggregator22) buildFiles(ctx context.Context, step uint64, txFrom, txTo
 		ac.code, err = a.code.collate(step, txFrom, txTo, tx, logEvery)
 		return err
 	}); err != nil {
-		errCh <- err
+		return sf, err
+		//errCh <- err
 	}
 
 	if sf.code, err = a.code.buildFiles(ctx, step, ac.code); err != nil {
-		errCh <- err
+		return sf, err
+		//errCh <- err
 	}
 	//}()
 	//go func() {
@@ -329,11 +336,13 @@ func (a *Aggregator22) buildFiles(ctx context.Context, step uint64, txFrom, txTo
 		ac.logAddrs, err = a.logAddrs.collate(ctx, txFrom, txTo, tx, logEvery)
 		return err
 	}); err != nil {
-		errCh <- err
+		return sf, err
+		//errCh <- err
 	}
 
 	if sf.logAddrs, err = a.logAddrs.buildFiles(ctx, step, ac.logAddrs); err != nil {
-		errCh <- err
+		return sf, err
+		//errCh <- err
 	}
 	//}()
 	//go func() {
@@ -343,11 +352,13 @@ func (a *Aggregator22) buildFiles(ctx context.Context, step uint64, txFrom, txTo
 		ac.logTopics, err = a.logTopics.collate(ctx, txFrom, txTo, tx, logEvery)
 		return err
 	}); err != nil {
-		errCh <- err
+		return sf, err
+		//errCh <- err
 	}
 
 	if sf.logTopics, err = a.logTopics.buildFiles(ctx, step, ac.logTopics); err != nil {
-		errCh <- err
+		return sf, err
+		//errCh <- err
 	}
 	//}()
 	//go func() {
@@ -357,11 +368,13 @@ func (a *Aggregator22) buildFiles(ctx context.Context, step uint64, txFrom, txTo
 		ac.tracesFrom, err = a.tracesFrom.collate(ctx, txFrom, txTo, tx, logEvery)
 		return err
 	}); err != nil {
-		errCh <- err
+		return sf, err
+		//errCh <- err
 	}
 
 	if sf.tracesFrom, err = a.tracesFrom.buildFiles(ctx, step, ac.tracesFrom); err != nil {
-		errCh <- err
+		return sf, err
+		//errCh <- err
 	}
 	//}()
 	//go func() {
@@ -371,27 +384,29 @@ func (a *Aggregator22) buildFiles(ctx context.Context, step uint64, txFrom, txTo
 		ac.tracesTo, err = a.tracesTo.collate(ctx, txFrom, txTo, tx, logEvery)
 		return err
 	}); err != nil {
-		errCh <- err
+		return sf, err
+		//errCh <- err
 	}
 
 	if sf.tracesTo, err = a.tracesTo.buildFiles(ctx, step, ac.tracesTo); err != nil {
-		errCh <- err
+		return sf, err
+		//		errCh <- err
 	}
 	//}()
 	//go func() {
 	//	wg.Wait()
-	close(errCh)
+	//close(errCh)
 	//}()
-	var lastError error
-	for err := range errCh {
-		if err != nil {
-			lastError = err
-		}
-	}
-	if lastError == nil {
-		closeColl = false
-	}
-	return sf, lastError
+	//var lastError error
+	//for err := range errCh {
+	//	if err != nil {
+	//		lastError = err
+	//	}
+	//}
+	//if lastError == nil {
+	closeColl = false
+	//}
+	return sf, nil
 }
 
 type Agg22StaticFiles struct {
@@ -412,6 +427,25 @@ func (sf Agg22StaticFiles) Close() {
 	sf.logTopics.Close()
 	sf.tracesFrom.Close()
 	sf.tracesTo.Close()
+}
+
+func (a *Aggregator22) BuildFiles(ctx context.Context, db kv.RoDB) (err error) {
+	if (a.txNum.Load() + 1) <= a.maxTxNum.Load()+a.aggregationStep+a.keepInDB { // Leave one step worth in the DB
+		return nil
+	}
+
+	// trying to create as much small-step-files as possible:
+	// - to reduce amount of small merges
+	// - to remove old data from db as early as possible
+	// - during files build, may happen commit of new data. on each loop step getting latest id in db
+	step := a.EndTxNumMinimax() / a.aggregationStep
+	for ; step < lastIdInDB(db, a.accounts.indexKeysTable)/a.aggregationStep; step++ {
+		if err := a.buildFilesInBackground(ctx, step, db); err != nil {
+			log.Warn("buildFilesInBackground", "err", err)
+			break
+		}
+	}
+	return nil
 }
 
 func (a *Aggregator22) buildFilesInBackground(ctx context.Context, step uint64, db kv.RoDB) (err error) {
@@ -628,13 +662,19 @@ func (a *Aggregator22) CanPruneFrom(tx kv.Tx) uint64 {
 	}
 	return math2.MaxUint64
 }
-func (a *Aggregator22) Prune(ctx context.Context, limit uint64) error {
-	//a.Warmup(0, cmp.Max(a.aggregationStep, limit)) // warmup is asyn and moving faster than data deletion
-	defer func(t time.Time) {
-		if time.Since(t) > time.Second {
-			log.Debug(fmt.Sprintf("prune took: %s\n", time.Since(t)))
+
+func (a *Aggregator22) PruneWithTiemout(ctx context.Context, timeout time.Duration) error {
+	t := time.Now()
+	for a.CanPrune(a.rwTx) && time.Since(t) < timeout {
+		if err := a.Prune(ctx, 1_000); err != nil { // prune part of retired data, before commit
+			return err
 		}
-	}(time.Now())
+	}
+	return nil
+}
+
+func (a *Aggregator22) Prune(ctx context.Context, limit uint64) error {
+	a.Warmup(0, cmp.Max(a.aggregationStep, limit)) // warmup is asyn and moving faster than data deletion
 	return a.prune(ctx, 0, a.maxTxNum.Load(), limit)
 }
 
@@ -693,7 +733,7 @@ func (a *Aggregator22) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) 
 	}
 
 	var m runtime.MemStats
-	common2.ReadMemStats(&m)
+	dbg.ReadMemStats(&m)
 	log.Info("[Snapshots] History Stat",
 		"blocks", fmt.Sprintf("%dk", (histBlockNumProgress+1)/1000),
 		"txs", fmt.Sprintf("%dm", a.maxTxNum.Load()/1_000_000),
@@ -1123,25 +1163,6 @@ func (ac *Aggregator22Context) TraceToIterator(addr []byte, startTxNum, endTxNum
 	return ac.tracesTo.IterateRange(addr, startTxNum, endTxNum, roTx)
 }
 
-func (ac *Aggregator22Context) IsMaxAccountsTxNum(addr []byte, txNum uint64) bool {
-	return ac.accounts.IsMaxTxNum(addr, txNum)
-}
-
-func (ac *Aggregator22Context) IsMaxStorageTxNum(addr []byte, loc []byte, txNum uint64) bool {
-	if cap(ac.keyBuf) < len(addr)+len(loc) {
-		ac.keyBuf = make([]byte, len(addr)+len(loc))
-	} else if len(ac.keyBuf) != len(addr)+len(loc) {
-		ac.keyBuf = ac.keyBuf[:len(addr)+len(loc)]
-	}
-	copy(ac.keyBuf, addr)
-	copy(ac.keyBuf[len(addr):], loc)
-	return ac.storage.IsMaxTxNum(ac.keyBuf, txNum)
-}
-
-func (ac *Aggregator22Context) IsMaxCodeTxNum(addr []byte, txNum uint64) bool {
-	return ac.code.IsMaxTxNum(addr, txNum)
-}
-
 func (ac *Aggregator22Context) ReadAccountDataNoStateWithRecent(addr []byte, txNum uint64) ([]byte, bool, error) {
 	return ac.accounts.GetNoStateWithRecent(addr, txNum, ac.tx)
 }
@@ -1192,30 +1213,6 @@ func (ac *Aggregator22Context) ReadAccountCodeSizeNoState(addr []byte, txNum uin
 		return 0, false, err
 	}
 	return len(code), noState, nil
-}
-
-func (ac *Aggregator22Context) IterateAccountsHistory(fromKey, toKey []byte, txNum uint64) *HistoryIterator {
-	return ac.accounts.iterateHistoryBeforeTxNum(fromKey, toKey, txNum)
-}
-
-func (ac *Aggregator22Context) IterateStorageHistory(fromKey, toKey []byte, txNum uint64) *HistoryIterator {
-	return ac.storage.iterateHistoryBeforeTxNum(fromKey, toKey, txNum)
-}
-
-func (ac *Aggregator22Context) IterateCodeHistory(fromKey, toKey []byte, txNum uint64) *HistoryIterator {
-	return ac.code.iterateHistoryBeforeTxNum(fromKey, toKey, txNum)
-}
-
-func (ac *Aggregator22Context) IterateAccountsReconTxs(fromKey, toKey []byte, txNum uint64) *ScanIterator {
-	return ac.accounts.iterateReconTxs(fromKey, toKey, txNum)
-}
-
-func (ac *Aggregator22Context) IterateStorageReconTxs(fromKey, toKey []byte, txNum uint64) *ScanIterator {
-	return ac.storage.iterateReconTxs(fromKey, toKey, txNum)
-}
-
-func (ac *Aggregator22Context) IterateCodeReconTxs(fromKey, toKey []byte, txNum uint64) *ScanIterator {
-	return ac.code.iterateReconTxs(fromKey, toKey, txNum)
 }
 
 type FilesStats22 struct {
@@ -1283,4 +1280,114 @@ func lastIdInDB(db kv.RoDB, table string) (lstInDb uint64) {
 		log.Warn("lastIdInDB", "err", err)
 	}
 	return lstInDb
+}
+
+// AggregatorStep is used for incremental reconstitution, it allows
+// accessing history in isolated way for each step
+type AggregatorStep struct {
+	a        *Aggregator22
+	accounts *HistoryStep
+	storage  *HistoryStep
+	code     *HistoryStep
+	keyBuf   []byte
+}
+
+func (a *Aggregator22) MakeSteps() []*AggregatorStep {
+	accountSteps := a.accounts.MakeSteps()
+	steps := make([]*AggregatorStep, len(accountSteps))
+	for i, accountStep := range accountSteps {
+		steps[i] = &AggregatorStep{
+			a:        a,
+			accounts: accountStep,
+		}
+	}
+	storageSteps := a.storage.MakeSteps()
+	for i, storageStep := range storageSteps {
+		steps[i].storage = storageStep
+	}
+	codeSteps := a.code.MakeSteps()
+	for i, codeStep := range codeSteps {
+		steps[i].code = codeStep
+	}
+	return steps
+}
+
+func (as *AggregatorStep) TxNumRange() (uint64, uint64) {
+	return as.accounts.indexFile.startTxNum, as.accounts.indexFile.endTxNum
+}
+
+func (as *AggregatorStep) IterateAccountsTxs() *ScanIteratorInc {
+	return as.accounts.iterateTxs()
+}
+
+func (as *AggregatorStep) IterateStorageTxs() *ScanIteratorInc {
+	return as.storage.iterateTxs()
+}
+
+func (as *AggregatorStep) IterateCodeTxs() *ScanIteratorInc {
+	return as.code.iterateTxs()
+}
+
+func (as *AggregatorStep) ReadAccountDataNoState(addr []byte, txNum uint64) ([]byte, bool, uint64) {
+	return as.accounts.GetNoState(addr, txNum)
+}
+
+func (as *AggregatorStep) ReadAccountStorageNoState(addr []byte, loc []byte, txNum uint64) ([]byte, bool, uint64) {
+	if cap(as.keyBuf) < len(addr)+len(loc) {
+		as.keyBuf = make([]byte, len(addr)+len(loc))
+	} else if len(as.keyBuf) != len(addr)+len(loc) {
+		as.keyBuf = as.keyBuf[:len(addr)+len(loc)]
+	}
+	copy(as.keyBuf, addr)
+	copy(as.keyBuf[len(addr):], loc)
+	return as.storage.GetNoState(as.keyBuf, txNum)
+}
+
+func (as *AggregatorStep) ReadAccountCodeNoState(addr []byte, txNum uint64) ([]byte, bool, uint64) {
+	return as.code.GetNoState(addr, txNum)
+}
+
+func (as *AggregatorStep) ReadAccountCodeSizeNoState(addr []byte, txNum uint64) (int, bool, uint64) {
+	code, noState, stateTxNum := as.code.GetNoState(addr, txNum)
+	return len(code), noState, stateTxNum
+}
+
+func (as *AggregatorStep) MaxTxNumAccounts(addr []byte) (bool, uint64) {
+	return as.accounts.MaxTxNum(addr)
+}
+
+func (as *AggregatorStep) MaxTxNumStorage(addr []byte, loc []byte) (bool, uint64) {
+	if cap(as.keyBuf) < len(addr)+len(loc) {
+		as.keyBuf = make([]byte, len(addr)+len(loc))
+	} else if len(as.keyBuf) != len(addr)+len(loc) {
+		as.keyBuf = as.keyBuf[:len(addr)+len(loc)]
+	}
+	copy(as.keyBuf, addr)
+	copy(as.keyBuf[len(addr):], loc)
+	return as.storage.MaxTxNum(as.keyBuf)
+}
+
+func (as *AggregatorStep) MaxTxNumCode(addr []byte) (bool, uint64) {
+	return as.code.MaxTxNum(addr)
+}
+
+func (as *AggregatorStep) IterateAccountsHistory(txNum uint64) *HistoryIteratorInc {
+	return as.accounts.interateHistoryBeforeTxNum(txNum)
+}
+
+func (as *AggregatorStep) IterateStorageHistory(txNum uint64) *HistoryIteratorInc {
+	return as.storage.interateHistoryBeforeTxNum(txNum)
+}
+
+func (as *AggregatorStep) IterateCodeHistory(txNum uint64) *HistoryIteratorInc {
+	return as.code.interateHistoryBeforeTxNum(txNum)
+}
+
+func (as *AggregatorStep) Clone() *AggregatorStep {
+	return &AggregatorStep{
+		a:        as.a,
+		accounts: as.accounts.Clone(),
+		storage:  as.storage.Clone(),
+		code:     as.code.Clone(),
+	}
 }
