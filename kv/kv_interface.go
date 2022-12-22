@@ -68,6 +68,7 @@ const (
 	SentryDB     Label = 2
 	ConsensusDB  Label = 3
 	DownloaderDB Label = 4
+	AcctProofDB  Label = 99
 )
 
 func (l Label) String() string {
@@ -82,6 +83,8 @@ func (l Label) String() string {
 		return "consensus"
 	case DownloaderDB:
 		return "downloader"
+	case AcctProofDB:
+		return "proofdb"
 	default:
 		return "unknown"
 	}
