@@ -74,7 +74,7 @@ func NewMDBX(log log.Logger) MdbxOpts {
 		pageSize:       kv.DefaultPageSize(),
 		dirtySpace:     2 * (memory.TotalMemory() / 42),
 		growthStep:     2 * datasize.GB,
-		mergeThreshold: 32768,
+		mergeThreshold: 3 * 8192,
 	}
 	return opts
 }
@@ -129,7 +129,7 @@ func (opts MdbxOpts) InMem(tmpDir string) MdbxOpts {
 	}
 	opts.path = path
 	opts.inMem = true
-	opts.flags = mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.LifoReclaim | mdbx.WriteMap
+	opts.flags = mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.LifoReclaim | mdbx.NoMemInit
 	opts.mapSize = 512 * datasize.MB
 	return opts
 }
@@ -144,6 +144,7 @@ func (opts MdbxOpts) Flags(f func(uint) uint) MdbxOpts {
 	return opts
 }
 
+func (opts MdbxOpts) HasFlag(flag uint) bool { return opts.flags&flag != 0 }
 func (opts MdbxOpts) Readonly() MdbxOpts {
 	opts.flags = opts.flags | mdbx.Readonly
 	return opts
@@ -188,9 +189,6 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 	}
 	if dbg.NoSync() {
 		opts = opts.Flags(func(u uint) uint { return u | mdbx.SafeNoSync }) //nolint
-	}
-	if dbg.MergeTr() > 0 {
-		opts = opts.WriteMergeThreshold(uint64(dbg.MergeTr() * 8192)) //nolint
 	}
 	if dbg.MergeTr() > 0 {
 		opts = opts.WriteMergeThreshold(uint64(dbg.MergeTr() * 8192)) //nolint
@@ -307,6 +305,9 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 			return nil, err
 		}
 	}
+	//if err := env.SetOption(mdbx.OptSyncBytes, uint64(math2.MaxUint64)); err != nil {
+	//	return nil, err
+	//}
 
 	if opts.roTxsLimiter == nil {
 		targetSemCount := int64(runtime.GOMAXPROCS(-1) * 8)
@@ -389,12 +390,13 @@ type MdbxKV struct {
 }
 
 func (db *MdbxKV) PageSize() uint64 { return db.opts.pageSize }
+func (db *MdbxKV) ReadOnly() bool   { return db.opts.HasFlag(mdbx.Readonly) }
 
 // openDBIs - first trying to open existing DBI's in RO transaction
 // otherwise re-try by RW transaction
 // it allow open DB from another process - even if main process holding long RW transaction
 func (db *MdbxKV) openDBIs(buckets []string) error {
-	if db.opts.flags&mdbx.Readonly != 0 {
+	if db.ReadOnly() {
 		if err := db.View(context.Background(), func(tx kv.Tx) error {
 			for _, name := range buckets {
 				if db.buckets[name].IsDeprecated {
@@ -479,16 +481,21 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, db.opts.label.String(), stack2.Trace().String())
 	}
 	return &MdbxTx{
+		ctx:      ctx,
 		db:       db,
 		tx:       tx,
 		readOnly: true,
 	}, nil
 }
 
-func (db *MdbxKV) BeginRw(_ context.Context) (kv.RwTx, error)      { return db.beginRw(0) }
-func (db *MdbxKV) BeginRwAsync(_ context.Context) (kv.RwTx, error) { return db.beginRw(mdbx.TxNoSync) }
+func (db *MdbxKV) BeginRw(ctx context.Context) (kv.RwTx, error) {
+	return db.beginRw(ctx, 0)
+}
+func (db *MdbxKV) BeginRwAsync(ctx context.Context) (kv.RwTx, error) {
+	return db.beginRw(ctx, mdbx.TxNoSync)
+}
 
-func (db *MdbxKV) beginRw(flags uint) (txn kv.RwTx, err error) {
+func (db *MdbxKV) beginRw(ctx context.Context, flags uint) (txn kv.RwTx, err error) {
 	if db.closed.Load() {
 		return nil, fmt.Errorf("db closed")
 	}
@@ -505,8 +512,9 @@ func (db *MdbxKV) beginRw(flags uint) (txn kv.RwTx, err error) {
 		return nil, fmt.Errorf("%w, lable: %s, trace: %s", err, db.opts.label.String(), stack2.Trace().String())
 	}
 	return &MdbxTx{
-		db: db,
-		tx: tx,
+		db:  db,
+		tx:  tx,
+		ctx: ctx,
 	}, nil
 }
 
@@ -514,9 +522,11 @@ type MdbxTx struct {
 	tx               *mdbx.Txn
 	db               *MdbxKV
 	cursors          map[uint64]*mdbx.Cursor
+	streams          []kv.Closer
 	statelessCursors map[string]kv.Cursor
 	readOnly         bool
 	cursorID         uint64
+	ctx              context.Context
 }
 
 type MdbxCursor struct {
@@ -582,6 +592,66 @@ func (tx *MdbxTx) ForPrefix(bucket string, prefix []byte, walker func(k, v []byt
 	}
 	return nil
 }
+
+func (tx *MdbxTx) Prefix(table string, prefix []byte) (kv.Pairs, error) {
+	nextPrefix, ok := kv.NextSubtree(prefix)
+	if !ok {
+		return tx.Range(table, prefix, nil)
+	}
+	return tx.Range(table, prefix, nextPrefix)
+}
+
+func (tx *MdbxTx) Range(table string, fromPrefix, toPrefix []byte) (kv.Pairs, error) {
+	if toPrefix != nil && bytes.Compare(fromPrefix, toPrefix) >= 0 {
+		return nil, fmt.Errorf("tx.Range: %x must be lexicographicaly before %x", fromPrefix, toPrefix)
+	}
+	s, err := tx.newStreamCursor(table)
+	if err != nil {
+		return nil, err
+	}
+	s.toPrefix = toPrefix
+	s.nextK, s.nextV, s.nextErr = s.c.Seek(fromPrefix)
+	return s, nil
+}
+func (tx *MdbxTx) newStreamCursor(table string) (*cursor2stream, error) {
+	c, err := tx.Cursor(table)
+	if err != nil {
+		return nil, err
+	}
+	s := &cursor2stream{c: c, ctx: tx.ctx}
+	tx.streams = append(tx.streams, s)
+	return s, nil
+}
+
+type cursor2stream struct {
+	c            kv.Cursor
+	nextK, nextV []byte
+	nextErr      error
+	toPrefix     []byte
+	ctx          context.Context
+}
+
+func (s *cursor2stream) Close() { s.c.Close() }
+func (s *cursor2stream) HasNext() bool {
+	if s.toPrefix == nil {
+		return s.nextK != nil
+	}
+	if s.nextK == nil {
+		return false
+	}
+	return bytes.Compare(s.nextK, s.toPrefix) < 0
+}
+func (s *cursor2stream) Next() ([]byte, []byte, error) {
+	k, v, err := s.nextK, s.nextV, s.nextErr
+	select {
+	case <-s.ctx.Done():
+		return nil, nil, s.ctx.Err()
+	default:
+	}
+	s.nextK, s.nextV, s.nextErr = s.c.Next()
+	return k, v, err
+}
+
 func (tx *MdbxTx) ForAmount(bucket string, fromPrefix []byte, amount uint32, walker func(k, v []byte) error) error {
 	if amount == 0 {
 		return nil
@@ -672,6 +742,27 @@ func (db *MdbxKV) View(ctx context.Context, f func(tx kv.Tx) error) (err error) 
 	return f(tx)
 }
 
+func (db *MdbxKV) UpdateAsync(ctx context.Context, f func(tx kv.RwTx) error) (err error) {
+	if db.closed.Load() {
+		return fmt.Errorf("db closed")
+	}
+
+	tx, err := db.BeginRwAsync(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	err = f(tx)
+	if err != nil {
+		return err
+	}
+	err = tx.Commit()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (db *MdbxKV) Update(ctx context.Context, f func(tx kv.RwTx) error) (err error) {
 	if db.closed.Load() {
 		return fmt.Errorf("db closed")
@@ -716,7 +807,7 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 
 	var flags = tx.db.buckets[name].Flags
 	var nativeFlags uint
-	if tx.db.opts.flags&mdbx.Readonly == 0 {
+	if !tx.db.ReadOnly() {
 		nativeFlags |= mdbx.Create
 	}
 
@@ -899,6 +990,11 @@ func (tx *MdbxTx) closeCursors() {
 		}
 	}
 	tx.cursors = nil
+	for _, c := range tx.streams {
+		if c != nil {
+			c.Close()
+		}
+	}
 	tx.statelessCursors = nil
 }
 
