@@ -3,11 +3,11 @@ module github.com/ledgerwatch/erigon-lib
 go 1.18
 
 require (
-	github.com/ledgerwatch/interfaces v0.0.0-20221226080656-9ea2ff13ca12
+	github.com/ledgerwatch/interfaces v0.0.0-20230109080717-2274495fc48c
 	github.com/ledgerwatch/log/v3 v3.7.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/ledgerwatch/trackerslist v1.0.0
-	github.com/torquem-ch/mdbx-go v0.27.5
+	github.com/torquem-ch/mdbx-go v0.28.1
 )
 
 require (
@@ -26,15 +26,15 @@ require (
 	github.com/holiman/uint256 v1.2.1
 	github.com/matryer/moq v0.3.0
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
-	github.com/quasilyte/go-ruleguard/dsl v0.3.21
+	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.8.1
 	github.com/tidwall/btree v1.5.0
 	go.uber.org/atomic v1.10.0
 	golang.org/x/crypto v0.4.0
-	golang.org/x/exp v0.0.0-20221217163422-3c43f8badb15
+	golang.org/x/exp v0.0.0-20230111222715-75897c7a292a
 	golang.org/x/sync v0.1.0
-	golang.org/x/sys v0.3.0
+	golang.org/x/sys v0.4.0
 	golang.org/x/time v0.3.0
 	google.golang.org/grpc v1.51.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.2.0

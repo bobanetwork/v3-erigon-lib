@@ -31,7 +31,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/RoaringBitmap/roaring"
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
 	"github.com/google/btree"
@@ -64,6 +63,8 @@ type InvertedIndex struct {
 	workers         int
 	txNumBytes      [8]byte
 
+	localityIndex *LocalityIndex
+
 	wal     *invertedIndexWAL
 	walLock sync.RWMutex
 }
@@ -74,6 +75,7 @@ func NewInvertedIndex(
 	filenameBase string,
 	indexKeysTable string,
 	indexTable string,
+	withLocalityIndex bool,
 	integrityFileExtensions []string,
 ) (*InvertedIndex, error) {
 	ii := InvertedIndex{
@@ -94,6 +96,14 @@ func NewInvertedIndex(
 	if err := ii.openFiles(); err != nil {
 		return nil, fmt.Errorf("NewInvertedIndex: %s, %w", filenameBase, err)
 	}
+
+	if withLocalityIndex {
+		ii.localityIndex, err = NewLocalityIndex(dir, tmpdir, aggregationStep, filenameBase)
+		if err != nil {
+			return nil, fmt.Errorf("NewHistory: %s, %w", filenameBase, err)
+		}
+	}
+
 	return &ii, nil
 }
 
@@ -419,7 +429,7 @@ func (ii *invertedIndexWAL) add(key, indexKey []byte) error {
 }
 
 func (ii *InvertedIndex) MakeContext() *InvertedIndexContext {
-	var ic = InvertedIndexContext{ii: ii}
+	var ic = InvertedIndexContext{ii: ii, localityIndex: ii.localityIndex}
 	ic.files = btree.NewG[ctxItem](32, ctxItemLess)
 	ii.files.Ascend(func(item *filesItem) bool {
 		if item.index == nil {
@@ -454,12 +464,14 @@ type InvertedIterator struct {
 	res            []uint64
 	hasNextInFiles bool
 	hasNextInDb    bool
+	bm             *roaring64.Bitmap
 }
 
 func (it *InvertedIterator) Close() {
 	if it.cursor != nil {
 		it.cursor.Close()
 	}
+	bitmapdb.ReturnToPool64(it.bm)
 }
 
 func (it *InvertedIterator) advanceInFiles() {
@@ -569,30 +581,25 @@ func (it *InvertedIterator) next() uint64 {
 	it.advance()
 	return n
 }
-func (it *InvertedIterator) ToBitamp() *roaring64.Bitmap {
-	bm := bitmapdb.NewBitmap64()
-	for it.HasNext() {
-		bm.Add(it.next())
-	}
-	return bm
-}
 func (it *InvertedIterator) ToArray() (res []uint64) {
 	for it.HasNext() {
 		res = append(res, it.next())
 	}
 	return res
 }
-func (it *InvertedIterator) ToBitamp32() *roaring.Bitmap {
-	bm := bitmapdb.NewBitmap()
+func (it *InvertedIterator) ToBitmap() (*roaring64.Bitmap, error) {
+	it.bm = bitmapdb.NewBitmap64()
+	bm := it.bm
 	for it.HasNext() {
-		bm.Add(uint32(it.next()))
+		bm.Add(it.next())
 	}
-	return bm
+	return bm, nil
 }
 
 type InvertedIndexContext struct {
-	ii    *InvertedIndex
-	files *btree.BTreeG[ctxItem]
+	ii            *InvertedIndex
+	files         *btree.BTreeG[ctxItem]
+	localityIndex *LocalityIndex
 }
 
 // IterateRange is to be used in public API, therefore it relies on read-only transaction
@@ -644,6 +651,7 @@ func (it *InvertedIterator1) Close() {
 	if it.cursor != nil {
 		it.cursor.Close()
 	}
+
 }
 
 func (it *InvertedIterator1) advanceInFiles() {
