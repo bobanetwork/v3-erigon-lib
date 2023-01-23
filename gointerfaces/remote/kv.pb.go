@@ -812,7 +812,7 @@ func (x *SnapshotsReply) GetFiles() []string {
 	return nil
 }
 
-// Temporal methods
+//Temporal methods
 type DomainGetReq struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
