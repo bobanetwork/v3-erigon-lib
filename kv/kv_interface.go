@@ -20,27 +20,28 @@ import (
 	"context"
 	"errors"
 
-	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/VictoriaMetrics/metrics"
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 )
 
 //Variables Naming:
-//  ts - TimeStamp
+//  ts - TimeStamp (usually it's TxnNumber)
 //  tx - Database Transaction
 //  txn - Ethereum Transaction (and TxNum - is also number of Etherum Transaction)
 //  RoTx - Read-Only Database Transaction
 //  RwTx - Read-Write Database Transaction
 //  k - key
 //  v - value
-//  Cursor - low-level mdbx-tide api to walk over Table
-//  Stream - high-level simplified api for iteration over Table, InvertedIndex, History, Domain, ...
+//  Cursor - low-level mdbx-tide api to navigate over Table
+//  Iter - high-level iterator-like api over Table, InvertedIndex, History, Domain. Has less features than Cursor.
 
 //Methods Naming:
 //  Get: exact match of criterias
-//  Range: [from, to). Range(from, nil) means [from, EndOfTable). Range(nil, to) means [StartOfTable, to).
+//  Range: [from, to). Stream(from, nil) means [from, EndOfTable). Stream(nil, to) means [StartOfTable, to).
 //  Each: Range(from, nil)
 //  Prefix: `Range(Table, prefix, kv.NextSubtree(prefix))`
-//  Amount: [from, INF) AND maximum N records
+//  Limit: [from, INF) AND maximum N records
 
 //Entity Naming:
 //  State: simple table in db
@@ -315,18 +316,35 @@ type Tx interface {
 	Cursor(table string) (Cursor, error)
 	CursorDupSort(table string) (CursorDupSort, error) // CursorDupSort - can be used if bucket has mdbx.DupSort flag
 
-	ForEach(table string, fromPrefix []byte, walker func(k, v []byte) error) error
-	ForPrefix(table string, prefix []byte, walker func(k, v []byte) error) error
-	ForAmount(table string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
+	DBSize() (uint64, error)
+
+	// --- High-Level methods: 1request -> stream of server-side pushes ---
 
 	// Range [from, to)
 	// Range(from, nil) means [from, EndOfTable)
-	// Range(nil, to) means [StartOfTable, to)
-	// PrefixScan can be implemented as `Range(Table, prefix, kv.NextSubtree(prefix))`
-	Range(table string, fromPrefix, toPrefix []byte) (Pairs, error)
-	Prefix(table string, prefix []byte) (Pairs, error)
+	// Range(nil, to)   means [StartOfTable, to)
+	Range(table string, fromPrefix, toPrefix []byte) (iter.KV, error)
+	// Stream is like Range, but for requesting huge data (Example: full table scan). Client can't stop it.
+	//Stream(table string, fromPrefix, toPrefix []byte) (iter.KV, error)
+	// RangeAscend - like Range [from, to) but also allow pass Limit parameters
+	// Limit -1 means Unlimited
+	RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error)
+	//StreamAscend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error)
+	// RangeDescend - is like Range [from, to), but expecing `from`<`to`
+	// example: RangeDescend("Table", "B", "A", -1)
+	RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error)
+	//StreamDescend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error)
+	// Prefix - is exactly Range(Table, prefix, kv.NextSubtree(prefix))
+	Prefix(table string, prefix []byte) (iter.KV, error)
 
-	DBSize() (uint64, error)
+	// --- High-Level methods: 1request -> 1page of values in response -> send next page request ---
+	// Paginate(table string, fromPrefix, toPrefix []byte) (PairsStream, error)
+
+	// --- High-Level deprecated methods ---
+
+	ForEach(table string, fromPrefix []byte, walker func(k, v []byte) error) error
+	ForPrefix(table string, prefix []byte, walker func(k, v []byte) error) error
+	ForAmount(table string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
 }
 
 // RwTx
@@ -410,7 +428,9 @@ type CursorDupSort interface {
 	FirstDup() ([]byte, error)                       // FirstDup - position at first data item of current key
 	NextDup() ([]byte, []byte, error)                // NextDup - position at next data item of current key
 	NextNoDup() ([]byte, []byte, error)              // NextNoDup - position at first data item of next key
-	LastDup() ([]byte, error)                        // LastDup - position at last data item of current key
+	PrevDup() ([]byte, []byte, error)
+	PrevNoDup() ([]byte, []byte, error)
+	LastDup() ([]byte, error) // LastDup - position at last data item of current key
 
 	CountDuplicates() (uint64, error) // CountDuplicates - number of duplicates for the current key
 }
@@ -442,31 +462,20 @@ type TemporalTx interface {
 	Tx
 	DomainGet(name Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error)
 	HistoryGet(name History, k []byte, ts uint64) (v []byte, ok bool, err error)
-	IndexRange(name InvertedIdx, k []byte, fromTs, toTs uint64) (timestamps U64Stream, err error)
+
+	// IndexRange - return iterator over range of inverted index for given key `k`
+	// Asc semantic:  [from, to) AND from > to
+	// Desc semantic: [from, to) AND from < to
+	// Limit -1 means Unlimited
+	// from -1, to -1 means unbounded (StartOfTable, EndOfTable)
+	// Example: IndexRange("IndexName", 10, 5, order.Desc, -1)
+	// Example: IndexRange("IndexName", -1, -1, order.Asc, 10)
+	IndexRange(name InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error)
+	HistoryRange(name History, fromTs, toTs int, asc order.By, limit int) (it iter.KV, err error)
+	DomainRange(name Domain, k1, k2 []byte, asOfTs uint64, asc order.By, limit int) (it iter.KV, err error)
 }
 
 type TemporalRwDB interface {
 	RwDB
 	TemporalRoDb
 }
-
-// Stream - Iterator-like interface designed for grpc server-side streaming: 1 client request -> much responses from server
-//   - K, V are valid only until next .Next() call (TODO: extend it to whole Tx lifetime?)
-//   - No `Close` method: all streams produced by TemporalTx will be closed inside `tx.Rollback()` (by casting to `kv.Closer`)
-//   - automatically checks cancelation of `ctx` passed to `db.Begin(ctx)`, can skip this
-//     check in loops on stream. Stream has very limited API - user has no way to
-//     terminate it - but user can specify more strict conditions when creating stream (then server knows better when to stop)
-type Stream[K, V any] interface {
-	Next() (K, V, error)
-	HasNext() bool
-}
-type UnaryStream[V any] interface {
-	Next() (V, error)
-	//NextBatch() ([]V, error)
-	HasNext() bool
-}
-type U64Stream interface {
-	UnaryStream[uint64]
-	ToBitmap() (*roaring64.Bitmap, error)
-}
-type Pairs Stream[[]byte, []byte]

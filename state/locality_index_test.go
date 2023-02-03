@@ -19,9 +19,10 @@ func TestLocality(t *testing.T) {
 	defer li.Close()
 	err := li.BuildMissedIndices(ctx, ii)
 	require.NoError(err)
-
 	t.Run("locality iterator", func(t *testing.T) {
-		it := ii.MakeContext().iterateKeysLocality(math.MaxUint64)
+		ic := ii.MakeContext()
+		defer ic.Close()
+		it := ic.iterateKeysLocality(math.MaxUint64)
 		require.True(it.HasNext())
 		key, bitmap := it.Next()
 		require.Equal(uint64(2), binary.BigEndian.Uint64(key))
@@ -73,7 +74,7 @@ func TestLocality(t *testing.T) {
 	t.Run("locality index: lookup", func(t *testing.T) {
 		var k [8]byte
 		binary.BigEndian.PutUint64(k[:], 1)
-		v1, v2, from, ok1, ok2 := li.lookupIdxFiles(recsplit.NewIndexReader(files.index), files.bm, k[:], 1*li.aggregationStep*StepsInBiggestFile)
+		v1, v2, from, ok1, ok2 := li.lookupIdxFiles(recsplit.NewIndexReader(files.index), files.bm, li.file, k[:], 1*li.aggregationStep*StepsInBiggestFile)
 		require.True(ok1)
 		require.False(ok2)
 		require.Equal(uint64(1*StepsInBiggestFile), v1)
