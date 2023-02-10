@@ -60,15 +60,23 @@ func NewLocalityIndex(
 		aggregationStep: aggregationStep,
 		filenameBase:    filenameBase,
 	}
-	files, err := os.ReadDir(dir)
+	return li, nil
+}
+func (li *LocalityIndex) reOpenFolder() error {
+	if li == nil {
+		return nil
+	}
+
+	li.closeFiles()
+	files, err := os.ReadDir(li.dir)
 	if err != nil {
-		return nil, fmt.Errorf("NewInvertedIndex: %s, %w", filenameBase, err)
+		return fmt.Errorf("LocalityIndex: %s, %w", li.filenameBase, err)
 	}
 	_ = li.scanStateFiles(files)
 	if err = li.openFiles(); err != nil {
-		return nil, fmt.Errorf("NewInvertedIndex: %s, %w", filenameBase, err)
+		return fmt.Errorf("LocalityIndex: %s, %w", li.filenameBase, err)
 	}
-	return li, nil
+	return nil
 }
 
 func (li *LocalityIndex) scanStateFiles(files []fs.DirEntry) (uselessFiles []*filesItem) {
@@ -140,11 +148,16 @@ func (li *LocalityIndex) openFiles() (err error) {
 }
 
 func (li *LocalityIndex) closeFiles() {
-	if li.file.index != nil {
+	if li == nil {
+		return
+	}
+	if li.file != nil && li.file.index != nil {
 		li.file.index.Close()
+		li.file = nil
 	}
 	if li.bm != nil {
 		li.bm.Close()
+		li.bm = nil
 	}
 }
 
@@ -407,26 +420,25 @@ func (si *LocalityIterator) Next() ([]byte, []uint64) {
 
 func (ic *InvertedIndexContext) iterateKeysLocality(uptoTxNum uint64) *LocalityIterator {
 	si := &LocalityIterator{hc: ic}
-	ic.files.Ascend(func(item ctxItem) bool {
+	for _, item := range ic.files {
 		if !item.src.frozen || item.startTxNum > uptoTxNum {
-			return true
+			continue
 		}
 		if assert.Enable {
 			if (item.endTxNum-item.startTxNum)/ic.ii.aggregationStep != StepsInBiggestFile {
 				panic(fmt.Errorf("frozen file of small size: %s", item.src.decompressor.FileName()))
 			}
 		}
-		g := item.getter
+		g := item.src.decompressor.MakeGetter()
 		if g.HasNext() {
 			key, offset := g.NextUncompressed()
 
 			heapItem := &ReconItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum, g: g, txNum: ^item.endTxNum, key: key, startOffset: offset, lastOffset: offset}
 			heap.Push(&si.h, heapItem)
 		}
-		si.totalOffsets += uint64(item.getter.Size())
+		si.totalOffsets += uint64(g.Size())
 		si.filesAmount++
-		return true
-	})
+	}
 	si.advance()
 	return si
 }
