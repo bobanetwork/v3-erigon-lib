@@ -76,6 +76,9 @@ type Config struct {
 	NanoBlock       *big.Int `json:"nanoBlock,omitempty" toml:",omitempty"`       // nanoBlock switch block (nil = no fork, 0 = already activated)
 	MoranBlock      *big.Int `json:"moranBlock,omitempty" toml:",omitempty"`      // moranBlock switch block (nil = no fork, 0 = already activated)
 
+	// Optimism Forks
+	BedrockBlock *big.Int `json:"bedrockBlock,omitempty" toml:,omitEmpty"` // bedrockSwitch block (nil = no fork, 0 = already actived)
+
 	// Gnosis Chain fork blocks
 	PosdaoBlock *big.Int `json:"posdaoBlock,omitempty"`
 
@@ -83,11 +86,12 @@ type Config struct {
 	Eip1559FeeCollectorTransition *big.Int        `json:"eip1559FeeCollectorTransition,omitempty"` // (Optional) Block from which burnt EIP-1559 fees go to the Eip1559FeeCollector
 
 	// Various consensus engines
-	Ethash *EthashConfig `json:"ethash,omitempty"`
-	Clique *CliqueConfig `json:"clique,omitempty"`
-	Aura   *AuRaConfig   `json:"aura,omitempty"`
-	Parlia *ParliaConfig `json:"parlia,omitempty" toml:",omitempty"`
-	Bor    *BorConfig    `json:"bor,omitempty"`
+	Ethash   *EthashConfig   `json:"ethash,omitempty"`
+	Clique   *CliqueConfig   `json:"clique,omitempty"`
+	Aura     *AuRaConfig     `json:"aura,omitempty"`
+	Parlia   *ParliaConfig   `json:"parlia,omitempty" toml:",omitempty"`
+	Bor      *BorConfig      `json:"bor,omitempty"`
+	Optimism *OptimismConfig `json:"optimism,omitempty"`
 }
 
 func (c *Config) String() string {
@@ -145,6 +149,8 @@ func (c *Config) getEngine() string {
 		return c.Bor.String()
 	case c.Aura != nil:
 		return c.Aura.String()
+	case c.Optimism != nil:
+		return c.Optimism.String()
 	default:
 		return "unknown"
 	}
@@ -305,6 +311,10 @@ func (c *Config) IsSharding(time uint64) bool {
 // IsCancun returns whether time is either equal to the Cancun fork time or greater.
 func (c *Config) IsCancun(time uint64) bool {
 	return isForked(c.CancunTime, time)
+}
+
+func (c *Config) IsBedrock(num uint64) bool {
+	return isForked(c.BedrockBlock, num)
 }
 
 func (c *Config) IsEip1559FeeCollector(num uint64) bool {
@@ -536,6 +546,17 @@ func (c *CliqueConfig) String() string {
 	return "clique"
 }
 
+// OptimismConfig is the optimism config.
+type OptimismConfig struct {
+	EIP1559Elasticity  uint64 `json:"eip1559Elasticity"`
+	EIP1559Denominator uint64 `json:"eip1559Denominator"`
+}
+
+// String implements the stringer interface, returning the optimism fee config details.
+func (o *OptimismConfig) String() string {
+	return "optimism"
+}
+
 // AuRaConfig is the consensus engine configs for proof-of-authority based sealing.
 type AuRaConfig struct {
 	DBPath    string
@@ -655,6 +676,7 @@ type Rules struct {
 	IsNano, IsMoran, IsGibbs                                bool
 	IsEip1559FeeCollector                                   bool
 	IsParlia, IsAura                                        bool
+	IsBedrock                                               bool
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
@@ -680,6 +702,7 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsNano:                c.IsNano(num),
 		IsMoran:               c.IsMoran(num),
 		IsEip1559FeeCollector: c.IsEip1559FeeCollector(num),
+		IsBedrock:             c.IsBedrock(num),
 		IsParlia:              c.Parlia != nil,
 		IsAura:                c.Aura != nil,
 	}
