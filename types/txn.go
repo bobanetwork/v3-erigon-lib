@@ -107,7 +107,8 @@ const (
 	LegacyTxType     byte = 0
 	AccessListTxType byte = 1
 	DynamicFeeTxType byte = 2
-	DepositTxType    int = 0x7e
+	OffchainTxType   byte = 0x7d
+	DepositTxType    byte = 0x7e
 )
 
 var ErrParseTxn = fmt.Errorf("%w transaction", rlp.ErrParse)
@@ -156,14 +157,17 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 
 	log.Debug("MMDBG erigon-lib ParseTransaction", "legacy", legacy, "dataPos", p, "dataLen", dataLen, "payload", hexutil.Bytes(payload))
 
-	if !legacy && (dataPos == 0) && (int(payload[0]) == DepositTxType) {
+	if !legacy && (dataPos == 0) && (payload[0] == DepositTxType) {
 		log.Debug("MMDBG erigon-lib parsing as DepositTxType", "ctx", ctx, "slot", slot)
 	}
-	var txType int
+	if !legacy && (dataPos == 0) && (payload[0] == OffchainTxType) {
+		log.Debug("MMDBG erigon-lib parsing as OffchainTxType", "ctx", ctx, "slot", slot)
+	}
+	var txType byte
 
 	// If it is non-legacy transaction, the transaction type follows, and then the the list
 	if !legacy {
-		txType = int(payload[p])
+		txType = payload[p]
 		slot.Type = payload[p]
 		if _, err = ctx.Keccak1.Write(payload[p : p+1]); err != nil {
 			return 0, fmt.Errorf("%w: computing IdHash (hashing type Prefix): %s", ErrParseTxn, err)
@@ -201,7 +205,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	// Remember where signing hash data begins (it will need to be wrapped in an RLP list)
 	sigHashPos := p
 
-       if txType == DepositTxType {
+       if txType == DepositTxType || txType == OffchainTxType {
 	       log.Warn("MMDBG erigon-lib override ChainID")
 	       cID := uint256.Int{901}
 	       ctx.ChainID.Set(&cID) // FIXME
@@ -221,8 +225,12 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		}
 	}
 
-	if txType == DepositTxType {
-		slot.Nonce = 0xffff_ffff_ffff_fffd
+	if txType == DepositTxType || txType == OffchainTxType {
+		if txType == OffchainTxType {
+			slot.Nonce = 0xffff_ffff_ffff_fffc
+		} else {
+			slot.Nonce = 0xffff_ffff_ffff_fffd
+		}
 		slot.FeeCap = *new(uint256.Int)
 
 		dataPos, dataLen, err = rlp.String(payload, p) // SourceHash
@@ -310,6 +318,10 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	
 	if txType == DepositTxType {
 		log.Debug("MMDBG erigon-lib finished parsing DepositTxType")
+		return p,nil
+	}
+	if txType == OffchainTxType {
+		log.Debug("MMDBG erigon-lib finished parsing OffchainTxType")
 		return p,nil
 	}
 
