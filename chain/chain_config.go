@@ -25,6 +25,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 )
 
+// Optimism chain config
+var (
+	OptimismGoerliChainId = big.NewInt(420)
+	// March 17, 2023 @ 7:00:00 pm UTC
+	OptimismGoerliRegolithTime = uint64(1679079600)
+)
+
 // Config is the core config which determines the blockchain settings.
 //
 // Config is stored in the database on a per block basis. This means
@@ -66,6 +73,9 @@ type Config struct {
 	CancunTime       *big.Int `json:"cancunTime,omitempty"`       // Cancun switch time (nil = no fork, 0 = already activated)
 	ShardingForkTime *big.Int `json:"shardingForkTime,omitempty"` // Mini-Danksharding switch block (nil = no fork, 0 = already activated)
 
+	BedrockBlock *big.Int `json:"bedrockBlock,omitempty"` // Bedrock switch block (nil = no fork, 0 = already on optimism bedrock)
+	RegolithTime *uint64  `json:"regolithTime,omitempty"` // Regolith switch time (nil = no fork, 0 = already on optimism regolith)
+
 	// Parlia fork blocks
 	RamanujanBlock  *big.Int `json:"ramanujanBlock,omitempty" toml:",omitempty"`  // ramanujanBlock switch block (nil = no fork, 0 = already activated)
 	NielsBlock      *big.Int `json:"nielsBlock,omitempty" toml:",omitempty"`      // nielsBlock switch block (nil = no fork, 0 = already activated)
@@ -88,6 +98,20 @@ type Config struct {
 	Aura   *AuRaConfig   `json:"aura,omitempty"`
 	Parlia *ParliaConfig `json:"parlia,omitempty" toml:",omitempty"`
 	Bor    *BorConfig    `json:"bor,omitempty"`
+
+	// Optimism config, nil if not active
+	Optimism *OptimismConfig `json:"optimism,omitempty"`
+}
+
+// OptimismConfig is the optimism config.
+type OptimismConfig struct {
+	EIP1559Elasticity  uint64 `json:"eip1559Elasticity"`
+	EIP1559Denominator uint64 `json:"eip1559Denominator"`
+}
+
+// String implements the stringer interface, returning the optimism fee config details.
+func (o *OptimismConfig) String() string {
+	return "optimism"
 }
 
 func (c *Config) String() string {
@@ -311,6 +335,34 @@ func (c *Config) IsEip1559FeeCollector(num uint64) bool {
 	return c.Eip1559FeeCollector != nil && isForked(c.Eip1559FeeCollectorTransition, num)
 }
 
+// IsBedrock returns whether num is either equal to the Bedrock fork block or greater.
+func (c *Config) IsBedrock(num uint64) bool {
+	return isForked(c.BedrockBlock, num)
+}
+
+func (c *Config) IsRegolith(time uint64) bool {
+	return isTimestampForked(c.RegolithTime, time)
+}
+
+// IsOptimism returns whether the node is an optimism node or not.
+func (c *Config) IsOptimism() bool {
+	return c.Optimism != nil
+}
+
+// IsOptimismBedrock returns true iff this is an optimism node & bedrock is active
+func (c *Config) IsOptimismBedrock(num uint64) bool {
+	return c.IsOptimism() && c.IsBedrock(num)
+}
+
+func (c *Config) IsOptimismRegolith(time uint64) bool {
+	return c.IsOptimism() && c.IsRegolith(time)
+}
+
+// IsOptimismPreBedrock returns true iff this is an optimism node & bedrock is not yet active
+func (c *Config) IsOptimismPreBedrock(num uint64) bool {
+	return c.IsOptimism() && !c.IsBedrock(num)
+}
+
 // CheckCompatible checks whether scheduled fork transitions have been imported
 // with a mismatching chain configuration.
 func (c *Config) CheckCompatible(newcfg *Config, height uint64) *ConfigCompatError {
@@ -474,6 +526,16 @@ func (c *Config) checkCompatible(newcfg *Config, head uint64) *ConfigCompatError
 		return newCompatError("moran fork block", c.MoranBlock, newcfg.MoranBlock)
 	}
 	return nil
+}
+
+// isTimestampForked returns whether a fork scheduled at timestamp s is active
+// at the given head timestamp. Whilst this method is the same as isBlockForked,
+// they are explicitly separate for clearer reading.
+func isTimestampForked(s *uint64, head uint64) bool {
+	if s == nil {
+		return false
+	}
+	return *s <= head
 }
 
 func numEqual(x, y *big.Int) bool {
@@ -655,6 +717,7 @@ type Rules struct {
 	IsNano, IsMoran, IsGibbs                                bool
 	IsEip1559FeeCollector                                   bool
 	IsParlia, IsAura                                        bool
+	IsOptimismBedrock, IsOptimismRegolith                   bool
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
@@ -682,6 +745,9 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsEip1559FeeCollector: c.IsEip1559FeeCollector(num),
 		IsParlia:              c.Parlia != nil,
 		IsAura:                c.Aura != nil,
+		// Optimism
+		IsOptimismBedrock:  c.IsOptimismBedrock(num),
+		IsOptimismRegolith: c.IsOptimismRegolith(time),
 	}
 }
 
