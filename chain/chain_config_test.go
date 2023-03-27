@@ -30,7 +30,6 @@ func TestConfigRulesBedrock(t *testing.T) {
 		BedrockBlock: big.NewInt(50),
 	}
 	var block uint64
-
 	if c.IsBedrock(block) {
 		t.Errorf("expected %v to not be bedrock", block)
 	}
