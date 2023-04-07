@@ -108,7 +108,7 @@ const (
 	AccessListTxType byte = 1
 	DynamicFeeTxType byte = 2
 	OffchainTxType   byte = 0x7d
-	DepositTxType    int  = 0x7e
+	DepositTxType    byte = 0x7e
 )
 
 var ErrParseTxn = fmt.Errorf("%w transaction", rlp.ErrParse)
