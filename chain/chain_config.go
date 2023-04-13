@@ -32,6 +32,17 @@ var (
 	OptimismGoerliRegolithTime = uint64(1679079600)
 )
 
+// Boba chain config
+var (
+	BobaGoerliChainId = big.NewInt(2888)
+	// TODO - update this when we know the exact block
+	BobaGoerliBedrockBlock = big.NewInt(9000)
+	// TODO - updat this	when we know the exact timestamp
+	BobaGoerliBedrockTime = uint64(1680826751)
+	// Boba Goerli Replica URL
+	BobaLegacyGoerliURL = "https://replica.goerli.boba.network"
+)
+
 // Config is the core config which determines the blockchain settings.
 //
 // Config is stored in the database on a per block basis. This means
@@ -86,9 +97,6 @@ type Config struct {
 	GibbsBlock      *big.Int `json:"gibbsBlock,omitempty" toml:",omitempty"`
 	NanoBlock       *big.Int `json:"nanoBlock,omitempty" toml:",omitempty"`
 	MoranBlock      *big.Int `json:"moranBlock,omitempty" toml:",omitempty"`
-
-	// Optimism Forks
-	BedrockBlock *big.Int `json:"bedrockBlock,omitempty" toml:,omitEmpty"` // bedrockSwitch block (nil = no fork, 0 = already actived)
 
 	// Gnosis Chain fork blocks
 	PosdaoBlock *big.Int `json:"posdaoBlock,omitempty"`
@@ -324,10 +332,6 @@ func (c *Config) IsPrague(time uint64) bool {
 	return isForked(c.PragueTime, time)
 }
 
-func (c *Config) IsBedrock(num uint64) bool {
-	return isForked(c.BedrockBlock, num)
-}
-
 func (c *Config) IsEip1559FeeCollector(num uint64) bool {
 	return c.Eip1559FeeCollector != nil && isForked(c.Eip1559FeeCollectorTransition, num)
 }
@@ -358,6 +362,21 @@ func (c *Config) IsOptimismRegolith(time uint64) bool {
 // IsOptimismPreBedrock returns true iff this is an optimism node & bedrock is not yet active
 func (c *Config) IsOptimismPreBedrock(num uint64) bool {
 	return c.IsOptimism() && !c.IsBedrock(num)
+}
+
+func (c *Config) IsBobaPreBedrock(num *big.Int) bool {
+	// Boba Goerli
+	if BobaGoerliChainId.Cmp(c.ChainID) == 0 {
+		return BobaGoerliBedrockBlock.Cmp(num) > 0
+	}
+	return false
+}
+
+func (c *Config) GetBobaLegacyURL() string {
+	if BobaGoerliChainId.Cmp(c.ChainID) == 0 {
+		return BobaLegacyGoerliURL
+	}
+	return ""
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
