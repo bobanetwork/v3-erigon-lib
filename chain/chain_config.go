@@ -39,8 +39,12 @@ var (
 	BobaGoerliBedrockBlock = big.NewInt(9000)
 	// TODO - updat this	when we know the exact timestamp
 	BobaGoerliBedrockTime = uint64(1680826751)
-	// Boba Goerli Replica URL
-	BobaLegacyGoerliURL = "https://replica.goerli.boba.network"
+	// Boba Goerli genesis block coinbase
+	BobaGoerliGenesisCoinbase = "0x0000000000000000000000000000000000000000"
+	// Boba Goerli genesis block extra data
+	BobaGoerliGenesisExtraData = "000000000000000000000000000000000000000000000000000000000000000000000398232e2064f896018496b4b44b3d62751f0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+	// Boba Goerli genesis block hash
+	BobaGoerliGenesisRoot = "0x36c808dc3bb586c14bebde3ca630a4d49a1fdad0b01d7e58f96f2fcd1aa0003d"
 )
 
 // Config is the core config which determines the blockchain settings.
@@ -364,19 +368,12 @@ func (c *Config) IsOptimismPreBedrock(num uint64) bool {
 	return c.IsOptimism() && !c.IsBedrock(num)
 }
 
-func (c *Config) IsBobaPreBedrock(num *big.Int) bool {
+func (c *Config) IsBobaLegacyBlock(num *big.Int) bool {
 	// Boba Goerli
 	if BobaGoerliChainId.Cmp(c.ChainID) == 0 {
 		return BobaGoerliBedrockBlock.Cmp(num) > 0
 	}
 	return false
-}
-
-func (c *Config) GetBobaLegacyURL() string {
-	if BobaGoerliChainId.Cmp(c.ChainID) == 0 {
-		return BobaLegacyGoerliURL
-	}
-	return ""
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
