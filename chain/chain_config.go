@@ -79,6 +79,8 @@ type Config struct {
 
 	// Optimism Forks
 	BedrockBlock *big.Int `json:"bedrockBlock,omitempty" toml:,omitEmpty"` // bedrockSwitch block (nil = no fork, 0 = already actived)
+	// RegolithTime is *uint64 in op-geth
+	RegolithTime *big.Int  `json:"regolithTime,omitempty"` // Regolith switch time (nil = no fork, 0 = already on optimism regolith)
 
 	// Gnosis Chain fork blocks
 	PosdaoBlock *big.Int `json:"posdaoBlock,omitempty"`
@@ -316,6 +318,15 @@ func (c *Config) IsPrague(time uint64) bool {
 
 func (c *Config) IsBedrock(num uint64) bool {
 	return isForked(c.BedrockBlock, num)
+}
+
+func (c *Config) IsRegolith(time uint64) bool {
+	return isForked(c.RegolithTime, time)
+}
+
+func (c *Config) IsOptimismRegolith(time uint64) bool {
+	// Optimism op-geth has additional complexity which is not yet ported here.
+	return /* c.IsOptimism() && */ c.IsRegolith(time)
 }
 
 func (c *Config) IsEip1559FeeCollector(num uint64) bool {
@@ -680,7 +691,7 @@ type Rules struct {
 	IsNano, IsMoran, IsGibbs                                bool
 	IsEip1559FeeCollector                                   bool
 	IsParlia, IsAura                                        bool
-	IsBedrock                                               bool
+	IsBedrock, IsOptimismRegolith                           bool
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
@@ -708,6 +719,7 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsMoran:               c.IsMoran(num),
 		IsEip1559FeeCollector: c.IsEip1559FeeCollector(num),
 		IsBedrock:             c.IsBedrock(num),
+		IsOptimismRegolith:    c.IsOptimismRegolith(time),
 		IsParlia:              c.Parlia != nil,
 		IsAura:                c.Aura != nil,
 	}
