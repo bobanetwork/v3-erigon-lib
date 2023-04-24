@@ -275,10 +275,6 @@ func (c *Config) GetBobaGenesisCoinbase() string {
 	return "0x0000000000000000000000000000000000000000"
 }
 
-func (c *Config) IsEip1559FeeCollector(num uint64) bool {
-	return c.Eip1559FeeCollector != nil && isForked(c.Eip1559FeeCollectorTransition, num)
-}
-
 // CheckCompatible checks whether scheduled fork transitions have been imported
 // with a mismatching chain configuration.
 func (c *Config) CheckCompatible(newcfg *Config, height uint64) *ConfigCompatError {
@@ -622,9 +618,6 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsBedrock:             c.IsBedrock(num),
 		IsOptimismRegolith:    c.IsOptimismRegolith(time),
 		IsAura:                c.Aura != nil,
-		// Optimism
-		IsOptimismBedrock:  c.IsOptimismBedrock(num),
-		IsOptimismRegolith: c.IsOptimismRegolith(time),
 	}
 }
 
