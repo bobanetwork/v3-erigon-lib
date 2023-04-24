@@ -107,7 +107,7 @@ const (
 	LegacyTxType     byte = 0
 	AccessListTxType byte = 1
 	DynamicFeeTxType byte = 2
-	DepositTxType    int  = 0x7e
+	DepositTxType    byte  = 0x7e
 )
 
 var ErrParseTxn = fmt.Errorf("%w transaction", rlp.ErrParse)
@@ -156,14 +156,14 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 
 	log.Debug("MMDBG erigon-lib ParseTransaction", "legacy", legacy, "dataPos", p, "dataLen", dataLen, "payload", hexutil.Bytes(payload))
 
-	if !legacy && (dataPos == 0) && (int(payload[0]) == DepositTxType) {
+	if !legacy && (dataPos == 0) && (payload[0] == DepositTxType) {
 		log.Debug("MMDBG erigon-lib parsing as DepositTxType", "ctx", ctx, "slot", slot)
 	}
-	var txType int
+	var txType byte
 
 	// If it is non-legacy transaction, the transaction type follows, and then the the list
 	if !legacy {
-		txType = int(payload[p])
+		txType = payload[p]
 		slot.Type = payload[p]
 		if _, err = ctx.Keccak1.Write(payload[p : p+1]); err != nil {
 			return 0, fmt.Errorf("%w: computing IdHash (hashing type Prefix): %s", ErrParseTxn, err) //nolint
@@ -222,7 +222,6 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	}
 
 	if txType == DepositTxType {
-		slot.Nonce = 0xffff_ffff_ffff_fffd
 		slot.FeeCap = *new(uint256.Int)
 
 		dataPos, dataLen, err = rlp.String(payload, p) // SourceHash
