@@ -225,8 +225,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		}
 	}
 
-	if txType == DepositTxType || txType == OffchainTxType {
-		slot.Nonce = 0
+	if txType == DepositTxType || txType == OffchainTxType  {
 		slot.FeeCap = *new(uint256.Int)
 
 		dataPos, dataLen, err = rlp.String(payload, p) // SourceHash
