@@ -39,6 +39,8 @@ var (
 	BobaGoerliBedrockBlock = big.NewInt(9000)
 	// TODO - updat this	when we know the exact timestamp
 	BobaGoerliBedrockTime = uint64(1680826751)
+	// Boba Goerli genesis gas limit
+	BobaGoerliGenesisGasLimit = 11000000
 	// Boba Goerli genesis block coinbase
 	BobaGoerliGenesisCoinbase = "0x0000000000000000000000000000000000000000"
 	// Boba Goerli genesis block extra data
@@ -374,6 +376,22 @@ func (c *Config) IsBobaLegacyBlock(num *big.Int) bool {
 		return BobaGoerliBedrockBlock.Cmp(num) > 0
 	}
 	return false
+}
+
+func (c *Config) GetBobaGenesisGasLimit() int {
+	// Boba Goerli
+	if BobaGoerliChainId.Cmp(c.ChainID) == 0 {
+		return BobaGoerliGenesisGasLimit
+	}
+	return 11000000
+}
+
+func (c *Config) GetBobaGenesisCoinbase() string {
+	// Boba Goerli
+	if BobaGoerliChainId.Cmp(c.ChainID) == 0 {
+		return BobaGoerliGenesisCoinbase
+	}
+	return "0x0000000000000000000000000000000000000000"
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
