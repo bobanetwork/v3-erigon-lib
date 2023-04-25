@@ -275,6 +275,14 @@ func (c *Config) GetBobaGenesisCoinbase() string {
 	return "0x0000000000000000000000000000000000000000"
 }
 
+func (c *Config) GetBobaGenesisExtraData() string {
+	// Boba Goerli
+	if BobaGoerliChainId.Cmp(c.ChainID) == 0 {
+		return BobaGoerliGenesisExtraData
+	}
+	return ""
+}
+
 // CheckCompatible checks whether scheduled fork transitions have been imported
 // with a mismatching chain configuration.
 func (c *Config) CheckCompatible(newcfg *Config, height uint64) *ConfigCompatError {
