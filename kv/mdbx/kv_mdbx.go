@@ -81,7 +81,7 @@ func NewMDBX(log log.Logger) MdbxOpts {
 		// but for reproducibility of benchmarks - please don't rely on Available RAM
 		dirtySpace: 2 * (memory.TotalMemory() / 42),
 
-		mapSize:         8 * datasize.TB,
+		mapSize:         7 * datasize.TB,
 		growthStep:      2 * datasize.GB,
 		mergeThreshold:  3 * 8192,
 		shrinkThreshold: -1, // default
@@ -248,6 +248,10 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 	}
 
 	if opts.flags&mdbx.Accede == 0 {
+		if opts.label == kv.ChainDB {
+			log.Info(fmt.Sprintf("[db] params: growStep=%s, mapsSize=%s, shrinkThreshold=%d, pageSize=%s, ", opts.growthStep, opts.mapSize, opts.shrinkThreshold, datasize.ByteSize(opts.pageSize)) +
+				fmt.Sprintf("label=%s, WriteMap=%t, Durable=%t, NoReadahead=%t, ", opts.label, opts.flags&mdbx.WriteMap != 0, opts.flags&mdbx.Durable != 0, opts.flags&mdbx.NoReadahead != 0))
+		}
 		if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(opts.growthStep), opts.shrinkThreshold, int(opts.pageSize)); err != nil {
 			return nil, err
 		}
@@ -575,7 +579,7 @@ func (db *MdbxKV) AllDBI() map[string]kv.DBI {
 	return res
 }
 
-func (db *MdbxKV) AllBuckets() kv.TableCfg {
+func (db *MdbxKV) AllTables() kv.TableCfg {
 	return db.buckets
 }
 
@@ -681,7 +685,7 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 	cnfCopy := tx.db.buckets[name]
 	dbi, err := tx.tx.OpenDBI(name, mdbx.DBAccede, nil, nil)
 	if err != nil && !mdbx.IsNotFound(err) {
-		return fmt.Errorf("create bucket: %s, %w", name, err)
+		return fmt.Errorf("create table: %s, %w", name, err)
 	}
 	if err == nil {
 		cnfCopy.DBI = kv.DBI(dbi)
@@ -715,7 +719,7 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 	dbi, err = tx.tx.OpenDBI(name, nativeFlags, nil, nil)
 
 	if err != nil {
-		return fmt.Errorf("create bucket: %s, %w", name, err)
+		return fmt.Errorf("create table: %s, %w", name, err)
 	}
 	cnfCopy.DBI = kv.DBI(dbi)
 
