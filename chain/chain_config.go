@@ -25,6 +25,30 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 )
 
+// Optimism chain config
+var (
+	OptimismGoerliChainId = big.NewInt(420)
+	// March 17, 2023 @ 7:00:00 pm UTC
+	OptimismGoerliRegolithTime = uint64(1679079600)
+)
+
+// Boba chain config
+var (
+	BobaGoerliChainId = big.NewInt(2888)
+	// TODO - update this when we know the exact block
+	BobaGoerliBedrockBlock = big.NewInt(9000)
+	// TODO - updat this	when we know the exact timestamp
+	BobaGoerliBedrockTime = uint64(1680826751)
+	// Boba Goerli genesis gas limit
+	BobaGoerliGenesisGasLimit = 11000000
+	// Boba Goerli genesis block coinbase
+	BobaGoerliGenesisCoinbase = "0x0000000000000000000000000000000000000000"
+	// Boba Goerli genesis block extra data
+	BobaGoerliGenesisExtraData = "000000000000000000000000000000000000000000000000000000000000000000000398232e2064f896018496b4b44b3d62751f0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+	// Boba Goerli genesis block hash
+	BobaGoerliGenesisRoot = "0x36c808dc3bb586c14bebde3ca630a4d49a1fdad0b01d7e58f96f2fcd1aa0003d"
+)
+
 // Config is the core config which determines the blockchain settings.
 //
 // Config is stored in the database on a per block basis. This means
@@ -70,7 +94,7 @@ type Config struct {
 	// Optimism Forks
 	BedrockBlock *big.Int `json:"bedrockBlock,omitempty" toml:,omitEmpty"` // bedrockSwitch block (nil = no fork, 0 = already actived)
 	// RegolithTime is *uint64 in op-geth
-	RegolithTime *big.Int  `json:"regolithTime,omitempty"` // Regolith switch time (nil = no fork, 0 = already on optimism regolith)
+	RegolithTime *big.Int `json:"regolithTime,omitempty"` // Regolith switch time (nil = no fork, 0 = already on optimism regolith)
 
 	Eip1559FeeCollector           *common.Address `json:"eip1559FeeCollector,omitempty"`           // (Optional) Address where burnt EIP-1559 fees go to
 	Eip1559FeeCollectorTransition *big.Int        `json:"eip1559FeeCollectorTransition,omitempty"` // (Optional) Block from which burnt EIP-1559 fees go to the Eip1559FeeCollector
@@ -209,6 +233,11 @@ func (c *Config) IsPrague(time uint64) bool {
 	return isForked(c.PragueTime, time)
 }
 
+func (c *Config) IsEip1559FeeCollector(num uint64) bool {
+	return c.Eip1559FeeCollector != nil && isForked(c.Eip1559FeeCollectorTransition, num)
+}
+
+// IsBedrock returns whether num is either equal to the Bedrock fork block or greater.
 func (c *Config) IsBedrock(num uint64) bool {
 	return isForked(c.BedrockBlock, num)
 }
@@ -222,8 +251,36 @@ func (c *Config) IsOptimismRegolith(time uint64) bool {
 	return /* c.IsOptimism() && */ c.IsRegolith(time)
 }
 
-func (c *Config) IsEip1559FeeCollector(num uint64) bool {
-	return c.Eip1559FeeCollector != nil && isForked(c.Eip1559FeeCollectorTransition, num)
+func (c *Config) IsBobaLegacyBlock(num *big.Int) bool {
+	// Boba Goerli
+	if BobaGoerliChainId.Cmp(c.ChainID) == 0 {
+		return BobaGoerliBedrockBlock.Cmp(num) > 0
+	}
+	return false
+}
+
+func (c *Config) GetBobaGenesisGasLimit() int {
+	// Boba Goerli
+	if BobaGoerliChainId.Cmp(c.ChainID) == 0 {
+		return BobaGoerliGenesisGasLimit
+	}
+	return 11000000
+}
+
+func (c *Config) GetBobaGenesisCoinbase() string {
+	// Boba Goerli
+	if BobaGoerliChainId.Cmp(c.ChainID) == 0 {
+		return BobaGoerliGenesisCoinbase
+	}
+	return "0x0000000000000000000000000000000000000000"
+}
+
+func (c *Config) GetBobaGenesisExtraData() string {
+	// Boba Goerli
+	if BobaGoerliChainId.Cmp(c.ChainID) == 0 {
+		return BobaGoerliGenesisExtraData
+	}
+	return ""
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
@@ -357,6 +414,16 @@ func (c *Config) checkCompatible(newcfg *Config, head uint64) *ConfigCompatError
 	}
 
 	return nil
+}
+
+// isTimestampForked returns whether a fork scheduled at timestamp s is active
+// at the given head timestamp. Whilst this method is the same as isBlockForked,
+// they are explicitly separate for clearer reading.
+func isTimestampForked(s *uint64, head uint64) bool {
+	if s == nil {
+		return false
+	}
+	return *s <= head
 }
 
 func numEqual(x, y *big.Int) bool {
