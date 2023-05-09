@@ -1,3 +1,0 @@
-[submodule "interfaces"]
-	path = interfaces
-	url = https://github.com/bobanetwork/v3-erigon-interfaces
