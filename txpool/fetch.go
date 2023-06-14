@@ -175,7 +175,6 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 
 	var req *sentry.InboundMessage
 	for req, err = stream.Recv(); ; req, err = stream.Recv() {
-		log.Debug("MMDBG fetch.go 1", "req", req, "err", err)
 		if err != nil {
 			select {
 			case <-f.ctx.Done():
@@ -423,7 +422,6 @@ func (f *Fetch) receivePeer(sentryClient sentry.SentryClient) error {
 
 	var req *sentry.PeerEvent
 	for req, err = stream.Recv(); ; req, err = stream.Recv() {
-		log.Debug("MMDBG fetch.go 2", "req", req, "err", err)
 		if err != nil {
 			return err
 		}
@@ -459,7 +457,6 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 		return err
 	}
 	for req, err := stream.Recv(); ; req, err = stream.Recv() {
-		log.Debug("MMDBG fetch.go 3", "req", req, "err", err)
 		if err != nil {
 			return err
 		}
@@ -475,7 +472,6 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 					minedTxs.Txs[i] = &types2.TxSlot{}
 					if err = f.threadSafeParseStateChangeTxn(func(parseContext *types2.TxParseContext) error {
 						_, err := parseContext.ParseTransaction(change.Txs[i], 0, minedTxs.Txs[i], minedTxs.Senders.At(i), false /* hasEnvelope */, nil)
-						log.Debug("MMDBG ParseTransaction FORWARD", "i", i, "err", err, "tx", minedTxs.Txs[i])
 						return err
 					}); err != nil {
 						f.logger.Warn("stream.Recv", "err", err)
@@ -489,7 +485,6 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 					unwindTxs.Txs[i] = &types2.TxSlot{}
 					if err = f.threadSafeParseStateChangeTxn(func(parseContext *types2.TxParseContext) error {
 						_, err = parseContext.ParseTransaction(change.Txs[i], 0, unwindTxs.Txs[i], unwindTxs.Senders.At(i), false /* hasEnvelope */, nil)
-						log.Debug("MMDBG ParseTransaction UNWIND", "i", i, "err", err, "tx", unwindTxs.Txs[i])
 						return err
 					}); err != nil {
 						f.logger.Warn("stream.Recv", "err", err)
