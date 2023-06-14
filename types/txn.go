@@ -205,11 +205,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	// Remember where signing hash data begins (it will need to be wrapped in an RLP list)
 	sigHashPos := p
 
-	if txType == DepositTxType || txType == OffchainTxType {
-		log.Warn("MMDBG erigon-lib override ChainID")
-		cID := uint256.Int{901}
-		ctx.ChainID.Set(&cID) // FIXME
-	} else if !legacy {
+	if !legacy && txType != DepositTxType && txType != OffchainTxType {
 		p, err = rlp.U256(payload, p, &ctx.ChainID)
 		if err != nil {
 			return 0, fmt.Errorf("%w: chainId len: %s", ErrParseTxn, err) //nolint
