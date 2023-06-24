@@ -52,9 +52,9 @@ var (
 	// Bobabeam
 	BobabeamChainId = big.NewInt(1294)
 	// TODO - update this when we know the exact block
-	BobabeamBedrockBlock = big.NewInt(167534)
+	BobabeamBedrockBlock = big.NewInt(1611759)
 	// TODO - updat this when we know the exact timestamp
-	BobabeamBedrockTime = uint64(1685558090)
+	BobabeamBedrockTime = uint64(1687562881)
 	// Bobabeam genesis gas limit
 	BobabeamGenesisGasLimit = 11000000
 	// Bobabeam genesis block coinbase
