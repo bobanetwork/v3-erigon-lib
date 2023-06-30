@@ -93,20 +93,23 @@ type TxSlot struct {
 	Nonce          uint64      // Nonce of the transaction
 	DataLen        int         // Length of transaction's data (for calculation of intrinsic gas)
 	DataNonZeroLen int
-	AlAddrCount    int      // Number of addresses in the access list
-	AlStorCount    int      // Number of storage keys in the access list
-	Gas            uint64   // Gas limit of the transaction
-	IDHash         [32]byte // Transaction hash for the purposes of using it as a transaction Id
-	Traced         bool     // Whether transaction needs to be traced throughout transaction pool code and generate debug printing
-	Creation       bool     // Set to true if "To" field of the transaction is not set
-	Type           byte     // Transaction type
-	Size           uint32   // Size of the payload
+	AlAddrCount    int         // Number of addresses in the access list
+	AlStorCount    int         // Number of storage keys in the access list
+	BlobCount      uint64      // Number of blobs contained by the transaction
+	DataFeeCap     uint256.Int // max_fee_per_data_gas in EIP-4844
+	Gas            uint64      // Gas limit of the transaction
+	IDHash         [32]byte    // Transaction hash for the purposes of using it as a transaction Id
+	Traced         bool        // Whether transaction needs to be traced throughout transaction pool code and generate debug printing
+	Creation       bool        // Set to true if "To" field of the transaction is not set
+	Type           byte        // Transaction type
+	Size           uint32      // Size of the payload
 }
 
 const (
 	LegacyTxType     byte = 0
-	AccessListTxType byte = 1
-	DynamicFeeTxType byte = 2
+	AccessListTxType byte = 1 // EIP-2930
+	DynamicFeeTxType byte = 2 // EIP-1559
+	BlobTxType       byte = 3 // EIP-4844
 	OffchainTxType   byte = 0x7d
 	DepositTxType    byte = 0x7e
 )
@@ -125,9 +128,13 @@ func (ctx *TxParseContext) ChainIDRequired() *TxParseContext {
 	return ctx
 }
 
-// ParseTransaction extracts all the information from the transactions's payload (RLP) necessary to build TxSlot
-// it also performs syntactic validation of the transactions
-func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlot, sender []byte, hasEnvelope bool, validateHash func([]byte) error) (p int, err error) {
+// ParseTransaction extracts all the information from the transactions's payload (RLP) necessary to build TxSlot.
+// It also performs syntactic validation of the transactions.
+// wrappedWithBlobs means that for blob (type 3) transactions the full version with blobs/commitments/proofs is expected
+// (see https://eips.ethereum.org/EIPS/eip-4844#networking).
+func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlot, sender []byte, hasEnvelope, wrappedWithBlobs bool, validateHash func([]byte) error) (p int, err error) {
+	// TODO(eip-4844) implement blob txn parsing when wrappedWithBlobs is true
+
 	if len(payload) == 0 {
 		return 0, fmt.Errorf("%w: empty rlp", ErrParseTxn)
 	}
@@ -169,6 +176,9 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	if !legacy {
 		txType = payload[p]
 		slot.Type = payload[p]
+		if slot.Type > BlobTxType {
+			return 0, fmt.Errorf("%w: unknown transaction type: %d", ErrParseTxn, slot.Type)
+		}
 		if _, err = ctx.Keccak1.Write(payload[p : p+1]); err != nil {
 			return 0, fmt.Errorf("%w: computing IdHash (hashing type Prefix): %s", ErrParseTxn, err) //nolint
 		}
@@ -248,17 +258,17 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 			return 0, fmt.Errorf("%w: nonce: %s", ErrParseTxn, err) //nolint
 		}
 		// Next follows gas price or tip
-		// Although consensus rules specify that tip can be up to 256 bit long, we narrow it to 64 bit
 		p, err = rlp.U256(payload, p, &slot.Tip)
 		if err != nil {
 			return 0, fmt.Errorf("%w: tip: %s", ErrParseTxn, err) //nolint
 		}
+
+
 		// Next follows feeCap, but only for dynamic fee transactions, for legacy transaction, it is
 		// equal to tip
 		if slot.Type < DynamicFeeTxType {
 			slot.FeeCap = slot.Tip
 		} else {
-			// Although consensus rules specify that feeCap can be up to 256 bit long, we narrow it to 64 bit
 			p, err = rlp.U256(payload, p, &slot.FeeCap)
 			if err != nil {
 				return 0, fmt.Errorf("%w: feeCap: %s", ErrParseTxn, err) //nolint
@@ -320,8 +330,8 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 			return 0, fmt.Errorf("%w: access list len: %s", ErrParseTxn, err) //nolint
 		}
 		tuplePos := dataPos
-		var tupleLen int
 		for tuplePos < dataPos+dataLen {
+			var tupleLen int
 			tuplePos, tupleLen, err = rlp.List(payload, tuplePos)
 			if err != nil {
 				return 0, fmt.Errorf("%w: tuple len: %s", ErrParseTxn, err) //nolint
@@ -356,6 +366,29 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		}
 		p = dataPos + dataLen
 	}
+	if slot.Type == BlobTxType {
+		p, err = rlp.U256(payload, p, &slot.DataFeeCap)
+		if err != nil {
+			return 0, fmt.Errorf("%w: data fee cap: %s", ErrParseTxn, err) //nolint
+		}
+		dataPos, dataLen, err = rlp.List(payload, p)
+		if err != nil {
+			return 0, fmt.Errorf("%w: blob hashes len: %s", ErrParseTxn, err) //nolint
+		}
+		hashPos := dataPos
+		for hashPos < dataPos+dataLen {
+			hashPos, err = rlp.StringOfLen(payload, hashPos, 32)
+			if err != nil {
+				return 0, fmt.Errorf("%w: blob hash: %s", ErrParseTxn, err) //nolint
+			}
+			slot.BlobCount++
+			hashPos += 32
+		}
+		if hashPos != dataPos+dataLen {
+			return 0, fmt.Errorf("%w: extraneous space in the blob versioned hashes", ErrParseTxn)
+		}
+		p = dataPos + dataLen
+	}
 	// This is where the data for Sighash ends
 	// Next follows V of the signature
 	var vByte byte
@@ -384,8 +417,8 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 			if chainIDBits <= 7 {
 				chainIDLen = 1
 			} else {
-				chainIDLen = (chainIDBits + 7) / 8 // It is always < 56 bytes
-				sigHashLen++                       // For chainId len Prefix
+				chainIDLen = common.BitLenToByteLen(chainIDBits) // It is always < 56 bytes
+				sigHashLen++                                     // For chainId len Prefix
 			}
 			sigHashLen += uint(chainIDLen) // For chainId
 			sigHashLen += 2                // For two extra zeros
@@ -447,7 +480,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 			return 0, fmt.Errorf("%w: computing signHash (hashing len Prefix): %s", ErrParseTxn, err) //nolint
 		}
 	} else {
-		beLen := (bits.Len(sigHashLen) + 7) / 8
+		beLen := common.BitLenToByteLen(bits.Len(sigHashLen))
 		binary.BigEndian.PutUint64(ctx.buf[1:], uint64(sigHashLen))
 		ctx.buf[8-beLen] = byte(beLen) + 247
 		if _, err := ctx.Keccak2.Write(ctx.buf[8-beLen : 9]); err != nil {
@@ -773,7 +806,7 @@ func EncodeSenderLengthForStorage(nonce uint64, balance uint256.Int) uint {
 		structLength += uint(balance.ByteLen()) + 1
 	}
 	if nonce > 0 {
-		structLength += uint((bits.Len64(nonce)+7)/8) + 1
+		structLength += uint(common.BitLenToByteLen(bits.Len64(nonce))) + 1
 	}
 	return structLength
 }
@@ -783,7 +816,7 @@ func EncodeSender(nonce uint64, balance uint256.Int, buffer []byte) {
 	var pos = 1
 	if nonce > 0 {
 		fieldSet = 1
-		nonceBytes := (bits.Len64(nonce) + 7) / 8
+		nonceBytes := common.BitLenToByteLen(bits.Len64(nonce))
 		buffer[pos] = byte(nonceBytes)
 		var nonce = nonce
 		for i := nonceBytes; i > 0; i-- {
