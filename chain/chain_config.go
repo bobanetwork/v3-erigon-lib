@@ -70,7 +70,7 @@ type Config struct {
 	// Optimism Forks
 	BedrockBlock *big.Int `json:"bedrockBlock,omitempty" toml:,omitEmpty"` // bedrockSwitch block (nil = no fork, 0 = already actived)
 	// RegolithTime is *uint64 in op-geth
-	RegolithTime *big.Int  `json:"regolithTime,omitempty"` // Regolith switch time (nil = no fork, 0 = already on optimism regolith)
+	RegolithTime *big.Int `json:"regolithTime,omitempty"` // Regolith switch time (nil = no fork, 0 = already on optimism regolith)
 
 	Eip1559FeeCollector           *common.Address `json:"eip1559FeeCollector,omitempty"`           // (Optional) Address where burnt EIP-1559 fees go to
 	Eip1559FeeCollectorTransition *big.Int        `json:"eip1559FeeCollectorTransition,omitempty"` // (Optional) Block from which burnt EIP-1559 fees go to the Eip1559FeeCollector
@@ -215,6 +215,14 @@ func (c *Config) IsBedrock(num uint64) bool {
 
 func (c *Config) IsRegolith(time uint64) bool {
 	return isForked(c.RegolithTime, time)
+}
+
+func (c *Config) IsOptimismBedrock(num uint64) bool {
+	return c.Optimism != nil && c.IsBedrock(num)
+}
+
+func (c *Config) IsOptimismPreBedrock(num uint64) bool {
+	return c.Optimism != nil && !c.IsBedrock(num)
 }
 
 func (c *Config) IsOptimismRegolith(time uint64) bool {
