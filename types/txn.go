@@ -169,12 +169,10 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	if !legacy && (dataPos == 0) && (payload[0] == DepositTxType) {
 		log.Debug("MMDBG erigon-lib parsing as DepositTxType", "ctx", ctx, "slot", slot)
 	}
-	var txType byte
 	var wrapperDataPos, wrapperDataLen int
 
 	// If it is non-legacy transaction, the transaction type follows, and then the the list
 	if !legacy {
-		txType = payload[p]
 		slot.Type = payload[p]
 		if slot.Type > BlobTxType {
 			return 0, fmt.Errorf("%w: unknown transaction type: %d", ErrParseTxn, slot.Type)
@@ -289,8 +287,10 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 	// Compute transaction hash
 	ctx.Keccak1.Reset()
 	ctx.Keccak2.Reset()
+	var txType byte
 	if !legacy {
 		typeByte := []byte{slot.Type}
+		txType = typeByte[0]
 		if _, err = ctx.Keccak1.Write(typeByte); err != nil {
 			return 0, fmt.Errorf("%w: computing IdHash (hashing type Prefix): %s", ErrParseTxn, err) //nolint
 		}
@@ -332,7 +332,7 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 			return 0, fmt.Errorf("%w: %s, %d (expected %d)", ErrParseTxn, "invalid chainID", ctx.ChainID.Uint64(), ctx.cfg.ChainID.Uint64())
 		}
 	}
-
+	var dataPos, dataLen int
 	if txType == DepositTxType {
 		slot.FeeCap = *new(uint256.Int)
 
