@@ -29,7 +29,7 @@ $(GOBINREL):
 
 $(GOBINREL)/protoc: | $(GOBINREL)
 	$(eval PROTOC_TMP := $(shell mktemp -d))
-	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v22.3/protoc-22.3-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
+	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v23.3/protoc-23.3-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
 	cd "$(PROTOC_TMP)" && unzip protoc.zip
 	cp "$(PROTOC_TMP)/bin/protoc" "$(GOBIN)"
 	mkdir -p "$(PROTOC_INCLUDE)"
@@ -60,7 +60,8 @@ grpc: protoc-all
 		p2psentry/sentry.proto p2psentinel/sentinel.proto \
 		remote/kv.proto remote/ethbackend.proto \
 		downloader/downloader.proto execution/execution.proto \
-		txpool/txpool.proto txpool/mining.proto
+		txpool/txpool.proto txpool/mining.proto \
+		engine/engine.proto
 	rm -rf vendor
 
 $(GOBINREL)/moq: | $(GOBINREL)
@@ -80,7 +81,7 @@ lintci-deps-clean: golangci-lint-clean
 
 # download and build golangci-lint (https://golangci-lint.run)
 $(GOBINREL)/golangci-lint: | $(GOBINREL)
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$(GOBIN)" v1.52.2
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$(GOBIN)" v1.53.3
 
 golangci-lint-clean:
 	rm -f "$(GOBIN)/golangci-lint"
