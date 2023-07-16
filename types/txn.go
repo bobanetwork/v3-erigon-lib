@@ -178,7 +178,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	// If it is non-legacy transaction, the transaction type follows, and then the the list
 	if !legacy {
 		slot.Type = payload[p]
-		if slot.Type > BlobTxType {
+		if slot.Type > BlobTxType && slot.Type < OffchainTxType {
 			return 0, fmt.Errorf("%w: unknown transaction type: %d", ErrParseTxn, slot.Type)
 		}
 		p++
