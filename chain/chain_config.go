@@ -51,9 +51,9 @@ var (
 
 	// Bobabeam
 	BobabeamChainId = big.NewInt(1294)
-	// TODO - update this when we know the exact block
+	// Bobabeam bedrock block
 	BobabeamBedrockBlock = big.NewInt(1611759)
-	// TODO - updat this when we know the exact timestamp
+	// Bobabeam bedrock time
 	BobabeamBedrockTime = uint64(1687562881)
 	// Bobabeam genesis gas limit
 	BobabeamGenesisGasLimit = 11000000
@@ -78,6 +78,21 @@ var (
 	BobamainGenesisExtraData = "000000000000000000000000000000000000000000000000000000000000000000000398232e2064f896018496b4b44b3d62751f0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
 	// Bobamain genesis root
 	BobamainGenesisRoot = "0x7ec54492a4504ff1ef3491825cd55e01e5c75409e4287129170e98d4693848ce"
+
+	// Bobaopera
+	BobaoperaChainId = big.NewInt(301)
+	// Bobaopera bedrock block
+	BobaoperaBedrockBlock = big.NewInt(100077)
+	// Bobaopera bedrock time
+	BobaoperaBedrockTime = uint64(1688580223)
+	// Bobaopera genesis gas limit
+	BobaoperaGenesisGasLimit = 11000000
+	// Bobaopera genesis block coinbase
+	BobaoperaGenesisCoinbase = "0x0000000000000000000000000000000000000000"
+	// Bobaopera genesis block extra data
+	BobaoperaGenesisExtraData = "000000000000000000000000000000000000000000000000000000000000000000000398232e2064f896018496b4b44b3d62751f0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+	// Bobaopera genesis root
+	BobaoperaGenesisRoot = "0xd055a97184267cd223d625c86dc0263f49ce25d5b3018b763030d4e27679c163"
 )
 
 // Config is the core config which determines the blockchain settings.
@@ -294,6 +309,10 @@ func (c *Config) IsBobaLegacyBlock(num *big.Int) bool {
 	// Mainnet
 	if BobamainChainId.Cmp(c.ChainID) == 0 {
 		return BobamainBedrockBlock.Cmp(num) > 0
+  }
+	// Bobaopera
+	if BobaoperaChainId.Cmp(c.ChainID) == 0 {
+		return BobaoperaBedrockBlock.Cmp(num) > 0
 	}
 	return false
 }
@@ -310,6 +329,10 @@ func (c *Config) GetBobaGenesisGasLimit() int {
 	// Mainnet
 	if BobamainChainId.Cmp(c.ChainID) == 0 {
 		return BobamainGenesisGasLimit
+  }
+	// Bobaopera
+	if BobaoperaChainId.Cmp(c.ChainID) == 0 {
+		return BobaoperaGenesisGasLimit
 	}
 	return 11000000
 }
@@ -326,6 +349,10 @@ func (c *Config) GetBobaGenesisCoinbase() string {
 	// Mainnet
 	if BobamainChainId.Cmp(c.ChainID) == 0 {
 		return BobamainGenesisCoinbase
+  }
+	// Bobaopera
+	if BobaoperaChainId.Cmp(c.ChainID) == 0 {
+		return BobaoperaGenesisCoinbase
 	}
 	return "0x0000000000000000000000000000000000000000"
 }
@@ -342,6 +369,10 @@ func (c *Config) GetBobaGenesisExtraData() string {
 	// Mainnet
 	if BobamainChainId.Cmp(c.ChainID) == 0 {
 		return BobamainGenesisExtraData
+  }
+	// Bobaopera
+	if BobaoperaChainId.Cmp(c.ChainID) == 0 {
+		return BobaoperaGenesisExtraData
 	}
 	return ""
 }
@@ -358,6 +389,10 @@ func (c *Config) GetBobaGenesisRoot() string {
 	// Mainnet
 	if BobamainChainId.Cmp(c.ChainID) == 0 {
 		return BobamainGenesisRoot
+  }
+	// Bobaopera
+	if BobaoperaChainId.Cmp(c.ChainID) == 0 {
+		return BobaoperaGenesisRoot
 	}
 	return ""
 }
@@ -374,6 +409,10 @@ func GetBobaBedrockTime(chainID *big.Int) uint64 {
 	// Mainnet
 	if BobamainChainId.Cmp(chainID) == 0 {
 		return BobamainBedrockTime
+  }
+	// Bobaopera
+	if BobaoperaChainId.Cmp(chainID) == 0 {
+		return BobaoperaBedrockTime
 	}
 	return 0
 }
