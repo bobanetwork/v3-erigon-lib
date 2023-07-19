@@ -364,7 +364,7 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 
 		p, slot.Gas, err = rlp.U64(payload, p)
 		if err != nil {
-			return 0, fmt.Errorf("%w: d_gas: %w", ErrParseTxn, err)
+			return 0, fmt.Errorf("%w: d_gas: %s", ErrParseTxn, err) //nolint
 		}
 
 		p += 1 // SystemTx
