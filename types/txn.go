@@ -337,7 +337,7 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 		}
 	}
 	var dataPos, dataLen int
-	if txType == DepositTxType || txType == OffchainTxType {
+	if txType == DepositTxType {
 		slot.FeeCap = *new(uint256.Int)
 
 		dataPos, dataLen, err = rlp.String(payload, p) // SourceHash
@@ -349,6 +349,22 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 		dataPos, dataLen, err = rlp.String(payload, p) // Mint
 		p = dataPos + dataLen
 		dataPos, dataLen, err = rlp.String(payload, p) // Value
+		p = dataPos + dataLen
+
+		p, slot.Gas, err = rlp.U64(payload, p)
+		if err != nil {
+			return 0, fmt.Errorf("%w: d_gas: %s", ErrParseTxn, err)
+		}
+
+		p += 1 // SystemTx
+	} else if txType == OffchainTxType {
+		slot.FeeCap = *new(uint256.Int)
+
+		dataPos, dataLen, err = rlp.String(payload, p) // SourceHash
+		p = dataPos + dataLen
+		dataPos, dataLen, err = rlp.String(payload, p) // From
+		p = dataPos + dataLen
+		dataPos, dataLen, err = rlp.String(payload, p) // To
 		p = dataPos + dataLen
 
 		p, slot.Gas, err = rlp.U64(payload, p)
