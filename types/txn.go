@@ -222,7 +222,8 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 			// ctx.ChainID.Set(&ctx.cfg.ChainID)
 		}
 		if !ctx.ChainID.Eq(&ctx.cfg.ChainID) && !isZeroChainID {
-			return 0, fmt.Errorf("%w: %s, %d (expected %d)", ErrParseTxn, "invalid chainID", ctx.ChainID.Uint64(), ctx.cfg.ChainID.Uint64())
+			log.Warn("Found invalid chainID", "ctx.ChainID", ctx.ChainID, "ctx.cfg.ChainID", ctx.cfg.ChainID, "isZeroChainID", isZeroChainID)
+			// return 0, fmt.Errorf("%w: %s, %d (expected %d)", ErrParseTxn, "invalid chainID", ctx.ChainID.Uint64(), ctx.cfg.ChainID.Uint64())
 		}
 	}
 
@@ -374,12 +375,12 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 			// Do not add chain id and two extra zeros
 			vByte = byte(ctx.V.Uint64() - 27)
 			ctx.ChainID.Set(&ctx.cfg.ChainID)
-			isZeroChainID = true
 		} else {
 			ctx.ChainID.Sub(&ctx.V, u256.N35)
 			ctx.ChainID.Rsh(&ctx.ChainID, 1)
 			if !ctx.ChainID.Eq(&ctx.cfg.ChainID) && !isZeroChainID {
-				return 0, fmt.Errorf("%w: %s, %d (expected %d)", ErrParseTxn, "invalid chainID", ctx.ChainID.Uint64(), ctx.cfg.ChainID.Uint64())
+				log.Warn("Found invalid chainID not protected", "ctx.ChainID", ctx.ChainID, "ctx.cfg.ChainID", ctx.cfg.ChainID, "isZeroChainID", isZeroChainID)
+				// return 0, fmt.Errorf("%w: %s, %d (expected %d)", ErrParseTxn, "invalid chainID", ctx.ChainID.Uint64(), ctx.cfg.ChainID.Uint64())
 			}
 
 			chainIDBits = ctx.ChainID.BitLen()
