@@ -107,7 +107,7 @@ const (
 	LegacyTxType     byte = 0
 	AccessListTxType byte = 1
 	DynamicFeeTxType byte = 2
-	DepositTxType    byte  = 0x7e
+	DepositTxType    byte = 0x7e
 )
 
 var ErrParseTxn = fmt.Errorf("%w transaction", rlp.ErrParse)
@@ -201,6 +201,8 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	// Remember where signing hash data begins (it will need to be wrapped in an RLP list)
 	sigHashPos := p
 
+	isZeroChainID := false
+
 	if txType == DepositTxType {
 		log.Warn("MMDBG erigon-lib override ChainID")
 		cID := uint256.Int{901}
@@ -215,8 +217,11 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 				return 0, fmt.Errorf("%w: chainID is required", ErrParseTxn)
 			}
 			ctx.ChainID.Set(&ctx.cfg.ChainID)
+			isZeroChainID = true
+			// override chainID for legacy transaction
+			// ctx.ChainID.Set(&ctx.cfg.ChainID)
 		}
-		if !ctx.ChainID.Eq(&ctx.cfg.ChainID) {
+		if !ctx.ChainID.Eq(&ctx.cfg.ChainID) && !isZeroChainID {
 			return 0, fmt.Errorf("%w: %s, %d (expected %d)", ErrParseTxn, "invalid chainID", ctx.ChainID.Uint64(), ctx.cfg.ChainID.Uint64())
 		}
 	}
