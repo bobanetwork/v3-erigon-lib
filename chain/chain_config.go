@@ -37,9 +37,7 @@ var (
 	// Goerli
 	BobaGoerliChainId = big.NewInt(2888)
 	// TODO - update this when we know the exact block
-	BobaGoerliBedrockBlock = big.NewInt(9000)
-	// TODO - updat this when we know the exact timestamp
-	BobaGoerliBedrockTime = uint64(1680826751)
+	BobaGoerliBedrockBlock = big.NewInt(40500)
 	// Boba Goerli genesis gas limit
 	BobaGoerliGenesisGasLimit = 11000000
 	// Boba Goerli genesis block coinbase
@@ -53,8 +51,6 @@ var (
 	BobabeamChainId = big.NewInt(1294)
 	// Bobabeam bedrock block
 	BobabeamBedrockBlock = big.NewInt(1611759)
-	// Bobabeam bedrock time
-	BobabeamBedrockTime = uint64(1687562881)
 	// Bobabeam genesis gas limit
 	BobabeamGenesisGasLimit = 11000000
 	// Bobabeam genesis block coinbase
@@ -68,8 +64,6 @@ var (
 	BobamainChainId = big.NewInt(288)
 	// TODO - update this when we know the exact block
 	BobamainBedrockBlock = big.NewInt(1000100)
-	// TODO - updat this when we know the exact timestamp
-	BobamainBedrockTime = uint64(1687562881)
 	// Bobamain genesis gas limit
 	BobamainGenesisGasLimit = 11000000
 	// Bobamain genesis block coinbase
@@ -83,8 +77,6 @@ var (
 	BobaoperaChainId = big.NewInt(301)
 	// Bobaopera bedrock block
 	BobaoperaBedrockBlock = big.NewInt(100077)
-	// Bobaopera bedrock time
-	BobaoperaBedrockTime = uint64(1688580223)
 	// Bobaopera genesis gas limit
 	BobaoperaGenesisGasLimit = 11000000
 	// Bobaopera genesis block coinbase
@@ -309,7 +301,7 @@ func (c *Config) IsBobaLegacyBlock(num *big.Int) bool {
 	// Mainnet
 	if BobamainChainId.Cmp(c.ChainID) == 0 {
 		return BobamainBedrockBlock.Cmp(num) > 0
-  }
+	}
 	// Bobaopera
 	if BobaoperaChainId.Cmp(c.ChainID) == 0 {
 		return BobaoperaBedrockBlock.Cmp(num) > 0
@@ -329,7 +321,7 @@ func (c *Config) GetBobaGenesisGasLimit() int {
 	// Mainnet
 	if BobamainChainId.Cmp(c.ChainID) == 0 {
 		return BobamainGenesisGasLimit
-  }
+	}
 	// Bobaopera
 	if BobaoperaChainId.Cmp(c.ChainID) == 0 {
 		return BobaoperaGenesisGasLimit
@@ -349,7 +341,7 @@ func (c *Config) GetBobaGenesisCoinbase() string {
 	// Mainnet
 	if BobamainChainId.Cmp(c.ChainID) == 0 {
 		return BobamainGenesisCoinbase
-  }
+	}
 	// Bobaopera
 	if BobaoperaChainId.Cmp(c.ChainID) == 0 {
 		return BobaoperaGenesisCoinbase
@@ -369,7 +361,7 @@ func (c *Config) GetBobaGenesisExtraData() string {
 	// Mainnet
 	if BobamainChainId.Cmp(c.ChainID) == 0 {
 		return BobamainGenesisExtraData
-  }
+	}
 	// Bobaopera
 	if BobaoperaChainId.Cmp(c.ChainID) == 0 {
 		return BobaoperaGenesisExtraData
@@ -389,32 +381,12 @@ func (c *Config) GetBobaGenesisRoot() string {
 	// Mainnet
 	if BobamainChainId.Cmp(c.ChainID) == 0 {
 		return BobamainGenesisRoot
-  }
+	}
 	// Bobaopera
 	if BobaoperaChainId.Cmp(c.ChainID) == 0 {
 		return BobaoperaGenesisRoot
 	}
 	return ""
-}
-
-func GetBobaBedrockTime(chainID *big.Int) uint64 {
-	// Boba Goerli
-	if BobaGoerliChainId.Cmp(chainID) == 0 {
-		return BobaGoerliBedrockTime
-	}
-	// Bobabeam
-	if BobabeamChainId.Cmp(chainID) == 0 {
-		return BobabeamBedrockTime
-	}
-	// Mainnet
-	if BobamainChainId.Cmp(chainID) == 0 {
-		return BobamainBedrockTime
-  }
-	// Bobaopera
-	if BobaoperaChainId.Cmp(chainID) == 0 {
-		return BobaoperaBedrockTime
-	}
-	return 0
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
