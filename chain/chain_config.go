@@ -68,9 +68,9 @@ type Config struct {
 	PragueTime   *big.Int `json:"pragueTime,omitempty"`
 
 	// Optimism Forks
-	BedrockBlock *big.Int `json:"bedrockBlock,omitempty" toml:,omitEmpty"` // bedrockSwitch block (nil = no fork, 0 = already actived)
+	BedrockBlock *big.Int `json:"bedrockBlock,omitempty"` // bedrockSwitch block (nil = no fork, 0 = already actived)
 	// RegolithTime is *uint64 in op-geth
-	RegolithTime *big.Int  `json:"regolithTime,omitempty"` // Regolith switch time (nil = no fork, 0 = already on optimism regolith)
+	RegolithTime *big.Int `json:"regolithTime,omitempty"` // Regolith switch time (nil = no fork, 0 = already on optimism regolith)
 
 	Eip1559FeeCollector           *common.Address `json:"eip1559FeeCollector,omitempty"`           // (Optional) Address where burnt EIP-1559 fees go to
 	Eip1559FeeCollectorTransition *big.Int        `json:"eip1559FeeCollectorTransition,omitempty"` // (Optional) Block from which burnt EIP-1559 fees go to the Eip1559FeeCollector
@@ -217,9 +217,23 @@ func (c *Config) IsRegolith(time uint64) bool {
 	return isForked(c.RegolithTime, time)
 }
 
+// IsOptimism returns whether the node is an optimism node or not.
+func (c *Config) IsOptimism() bool {
+	return c.Optimism != nil
+}
+
+func (c *Config) IsOptimismBedrock(num uint64) bool {
+	return c.IsOptimism() && c.IsBedrock(num)
+}
+
 func (c *Config) IsOptimismRegolith(time uint64) bool {
 	// Optimism op-geth has additional complexity which is not yet ported here.
 	return /* c.IsOptimism() && */ c.IsRegolith(time)
+}
+
+// IsOptimismPreBedrock returns true iff this is an optimism node & bedrock is not yet active
+func (c *Config) IsOptimismPreBedrock(num uint64) bool {
+	return c.IsOptimism() && !c.IsBedrock(num)
 }
 
 func (c *Config) IsEip1559FeeCollector(num uint64) bool {
