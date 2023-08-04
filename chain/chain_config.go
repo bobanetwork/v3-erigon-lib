@@ -240,6 +240,22 @@ func (c *Config) IsEip1559FeeCollector(num uint64) bool {
 	return c.Eip1559FeeCollector != nil && isForked(c.Eip1559FeeCollectorTransition, num)
 }
 
+// BaseFeeChangeDenominator bounds the amount the base fee can change between blocks.
+func (c *Config) BaseFeeChangeDenominator(defaultParam int) uint64 {
+	if c.IsOptimism() {
+		return c.Optimism.EIP1559Denominator
+	}
+	return uint64(defaultParam)
+}
+
+// ElasticityMultiplier bounds the maximum gas limit an EIP-1559 block may have.
+func (c *Config) ElasticityMultiplier(defaultParam int) uint64 {
+	if c.IsOptimism() {
+		return c.Optimism.EIP1559Elasticity
+	}
+	return uint64(defaultParam)
+}
+
 // CheckCompatible checks whether scheduled fork transitions have been imported
 // with a mismatching chain configuration.
 func (c *Config) CheckCompatible(newcfg *Config, height uint64) *ConfigCompatError {
