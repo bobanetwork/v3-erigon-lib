@@ -5,11 +5,13 @@ on:
       - main
       - stable
       - alpha
+      - boba-develop
   pull_request:
     branches:
       - main
       - stable
       - alpha
+      - boba-develop
 env:
   CGO_ENABLED: "1"
   CGO_CXXFLAGS: "-g -O2 -std=c++17"

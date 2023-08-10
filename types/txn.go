@@ -338,22 +338,37 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 	}
 	var dataPos, dataLen int
 	if txType == DepositTxType {
-		slot.FeeCap = *new(uint256.Int)
+		slot.FeeCap = uint256.Int{}
 
 		dataPos, dataLen, err = rlp.String(payload, p) // SourceHash
+		if err != nil {
+			log.Warn("failed to parse source hash", "err", err)
+		}
 		p = dataPos + dataLen
 		dataPos, dataLen, err = rlp.String(payload, p) // From
+		if err != nil {
+			log.Warn("failed to parse from", "err", err)
+		}
 		p = dataPos + dataLen
 		dataPos, dataLen, err = rlp.String(payload, p) // To
+		if err != nil {
+			log.Warn("failed to parse to", "err", err)
+		}
 		p = dataPos + dataLen
 		dataPos, dataLen, err = rlp.String(payload, p) // Mint
+		if err != nil {
+			log.Warn("failed to parse mint", "err", err)
+		}
 		p = dataPos + dataLen
 		dataPos, dataLen, err = rlp.String(payload, p) // Value
+		if err != nil {
+			log.Warn("failed to parse value", "err", err)
+		}
 		p = dataPos + dataLen
 
 		p, slot.Gas, err = rlp.U64(payload, p)
 		if err != nil {
-			return 0, fmt.Errorf("%w: d_gas: %s", ErrParseTxn, err)
+			return 0, fmt.Errorf("%w: d_gas: %s", ErrParseTxn, err) //nolint
 		}
 
 		p += 1 // SystemTx
