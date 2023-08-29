@@ -450,7 +450,7 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 		return p, nil
 	}
 	if txType == OffchainTxType {
-		return p,nil
+		return p, nil
 	}
 
 	// Next follows access list for non-legacy transactions, we are only interesting in number of addresses and storage keys
