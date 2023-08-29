@@ -170,9 +170,6 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	if !legacy && (dataPos == 0) && (payload[0] == DepositTxType) {
 		log.Debug("MMDBG erigon-lib parsing as DepositTxType", "ctx", ctx, "slot", slot)
 	}
-	if !legacy && (dataPos == 0) && (payload[0] == OffchainTxType) {
-		log.Debug("MMDBG erigon-lib parsing as OffchainTxType", "ctx", ctx, "slot", slot)
-	}
 	var wrapperDataPos, wrapperDataLen int
 
 	// If it is non-legacy transaction, the transaction type follows, and then the the list
@@ -386,8 +383,6 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 		if err != nil {
 			return 0, fmt.Errorf("%w: d_gas: %s", ErrParseTxn, err)
 		}
-
-		p += 1 // SystemTx
 	} else {
 		// Next follows the nonce, which we need to parse
 		p, slot.Nonce, err = rlp.U64(payload, p)
@@ -455,7 +450,6 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 		return p, nil
 	}
 	if txType == OffchainTxType {
-		log.Debug("MMDBG erigon-lib finished parsing OffchainTxType")
 		return p,nil
 	}
 

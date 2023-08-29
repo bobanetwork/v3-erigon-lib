@@ -114,4 +114,4 @@ require (
 	rsc.io/tmplfunc v0.0.3 // indirect
 )
 
-replace github.com/ledgerwatch/interfaces => github.com/bobanetwork/v3-erigon-interfaces v0.0.0-20230710182030-5bc7412a2d89
+replace github.com/ledgerwatch/interfaces => github.com/bobanetwork/v3-erigon-interfaces v0.0.0-20230712062536-f25dbfe72511
