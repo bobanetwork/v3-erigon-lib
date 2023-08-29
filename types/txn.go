@@ -117,6 +117,7 @@ const (
 	AccessListTxType byte = 1 // EIP-2930
 	DynamicFeeTxType byte = 2 // EIP-1559
 	BlobTxType       byte = 3 // EIP-4844
+	OffchainTxType   byte = 0x7d
 	DepositTxType    byte = 0x7e
 )
 
@@ -174,7 +175,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	// If it is non-legacy transaction, the transaction type follows, and then the the list
 	if !legacy {
 		slot.Type = payload[p]
-		if slot.Type > BlobTxType && slot.Type != DepositTxType {
+		if slot.Type > BlobTxType && slot.Type < OffchainTxType {
 			return 0, fmt.Errorf("%w: unknown transaction type: %d", ErrParseTxn, slot.Type)
 		}
 		p++
@@ -317,7 +318,7 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 	// Remember where signing hash data begins (it will need to be wrapped in an RLP list)
 	sigHashPos := p
 
-	if !legacy && txType != DepositTxType {
+	if !legacy && txType != DepositTxType && txType != OffchainTxType {
 		p, err = rlp.U256(payload, p, &ctx.ChainID)
 		if err != nil {
 			return 0, fmt.Errorf("%w: chainId len: %s", ErrParseTxn, err) //nolint
@@ -368,10 +369,23 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 		}
 
 		p += 1 // SystemTx
+	} else if txType == OffchainTxType {
+		slot.FeeCap = *new(uint256.Int)
+
+		dataPos, dataLen, err = rlp.String(payload, p) // SourceHash
+		p = dataPos + dataLen
+		dataPos, dataLen, err = rlp.String(payload, p) // From
+		p = dataPos + dataLen
+		dataPos, dataLen, err = rlp.String(payload, p) // To
+		p = dataPos + dataLen
+
+		p, slot.Gas, err = rlp.U64(payload, p)
+		if err != nil {
+			return 0, fmt.Errorf("%w: d_gas: %s", ErrParseTxn, err)
+		}
 	} else {
 		// Next follows the nonce, which we need to parse
 		p, slot.Nonce, err = rlp.U64(payload, p)
-
 		if err != nil {
 			return 0, fmt.Errorf("%w: nonce: %s", ErrParseTxn, err) //nolint
 		}
@@ -434,6 +448,9 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 	if txType == DepositTxType {
 		log.Debug("MMDBG erigon-lib finished parsing DepositTxType")
 		return p, nil
+	}
+	if txType == OffchainTxType {
+		return p,nil
 	}
 
 	// Next follows access list for non-legacy transactions, we are only interesting in number of addresses and storage keys
