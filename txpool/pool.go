@@ -174,6 +174,10 @@ func SortByNonceLess(a, b *metaTx) bool {
 }
 
 func calcProtocolBaseFee(baseFee uint64) uint64 {
+	// TODO(jky) What is going on here? Why was this returning a constant 7?
+	if baseFee < 7 {
+		return baseFee
+	}
 	return 7
 }
 
