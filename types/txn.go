@@ -425,6 +425,10 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 
 	p = dataPos + dataLen
 
+	if txType == DepositTxType {
+		return p, nil
+	}
+
 	// Next follows access list for non-legacy transactions, we are only interesting in number of addresses and storage keys
 	if !legacy {
 		dataPos, dataLen, err = rlp.List(payload, p)
