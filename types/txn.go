@@ -31,7 +31,6 @@ import (
 	"github.com/ledgerwatch/secp256k1"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -164,11 +163,6 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 
 	p = dataPos
 
-	log.Debug("MMDBG erigon-lib ParseTransaction", "legacy", legacy, "dataPos", p, "dataLen", dataLen, "payload", hexutil.Bytes(payload))
-
-	if !legacy && (dataPos == 0) && (payload[0] == DepositTxType) {
-		log.Debug("MMDBG erigon-lib parsing as DepositTxType", "ctx", ctx, "slot", slot)
-	}
 	var wrapperDataPos, wrapperDataLen int
 
 	// If it is non-legacy transaction, the transaction type follows, and then the the list
@@ -432,7 +426,6 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 	p = dataPos + dataLen
 
 	if txType == DepositTxType {
-		log.Debug("MMDBG erigon-lib finished parsing DepositTxType")
 		return p, nil
 	}
 
