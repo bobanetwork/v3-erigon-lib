@@ -1483,7 +1483,6 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 				notifyMiningAboutNewSlots()
 
 				if p.cfg.NoTxGossip {
-					fmt.Println("drain new transactions")
 					// drain newTxs for emptying newTx channel
 					// newTx channel will be filled only with local transactions
 					// early return to avoid outbound transaction propagation
