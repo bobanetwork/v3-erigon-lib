@@ -31,8 +31,8 @@ import (
 	"github.com/ledgerwatch/secp256k1"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/crypto"
@@ -86,7 +86,7 @@ func NewTxParseContext(chainID uint256.Int) *TxParseContext {
 // TxSlot contains information extracted from an Ethereum transaction, which is enough to manage it inside the transaction.
 // Also, it contains some auxillary information, like ephemeral fields, and indices within priority queues
 type TxSlot struct {
-	Rlp            []byte      // TxPool set it to nil after save it to db
+	Rlp            []byte      // Is set to nil after flushing to db, frees memory, later we look for it in the db, if needed
 	Value          uint256.Int // Value transferred by the transaction
 	Tip            uint256.Int // Maximum tip that transaction is giving to miner/block proposer
 	FeeCap         uint256.Int // Maximum fee that transaction burns and gives to the miner/block proposer
@@ -104,7 +104,7 @@ type TxSlot struct {
 	Size           uint32   // Size of the payload
 
 	// EIP-4844: Shard Blob Transactions
-	DataFeeCap  uint256.Int // max_fee_per_data_gas
+	BlobFeeCap  uint256.Int // max_fee_per_blob_gas
 	BlobHashes  []common.Hash
 	Blobs       [][]byte
 	Commitments []gokzg4844.KZGCommitment
@@ -125,12 +125,30 @@ var ErrRejected = errors.New("rejected")
 var ErrAlreadyKnown = errors.New("already known")
 var ErrRlpTooBig = errors.New("txn rlp too big")
 
+// Set the RLP validate function
 func (ctx *TxParseContext) ValidateRLP(f func(txnRlp []byte) error) { ctx.validateRlp = f }
-func (ctx *TxParseContext) WithSender(v bool)                       { ctx.withSender = v }
-func (ctx *TxParseContext) WithAllowPreEip2s(v bool)                { ctx.allowPreEip2s = v }
+
+// Set the with sender flag
+func (ctx *TxParseContext) WithSender(v bool) { ctx.withSender = v }
+
+// Set the AllowPreEIP2s flag
+func (ctx *TxParseContext) WithAllowPreEip2s(v bool) { ctx.allowPreEip2s = v }
+
+// Set ChainID-Required flag in the Parse context and return it
 func (ctx *TxParseContext) ChainIDRequired() *TxParseContext {
 	ctx.chainIDRequired = true
 	return ctx
+}
+
+func PeekTransactionType(serialized []byte) (byte, error) {
+	dataPos, _, legacy, err := rlp.Prefix(serialized, 0)
+	if err != nil {
+		return LegacyTxType, fmt.Errorf("%w: size Prefix: %s", ErrParseTxn, err) //nolint
+	}
+	if legacy {
+		return LegacyTxType, nil
+	}
+	return serialized[dataPos], nil
 }
 
 // ParseTransaction extracts all the information from the transactions's payload (RLP) necessary to build TxSlot.
@@ -213,12 +231,12 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		}
 		blobPos := dataPos
 		for blobPos < dataPos+dataLen {
-			blobPos, err = rlp.StringOfLen(payload, blobPos, chain.BlobSize)
+			blobPos, err = rlp.StringOfLen(payload, blobPos, fixedgas.BlobSize)
 			if err != nil {
 				return 0, fmt.Errorf("%w: blob: %s", ErrParseTxn, err) //nolint
 			}
-			slot.Blobs = append(slot.Blobs, payload[blobPos:blobPos+chain.BlobSize])
-			blobPos += chain.BlobSize
+			slot.Blobs = append(slot.Blobs, payload[blobPos:blobPos+fixedgas.BlobSize])
+			blobPos += fixedgas.BlobSize
 		}
 		if blobPos != dataPos+dataLen {
 			return 0, fmt.Errorf("%w: extraneous space in blobs", ErrParseTxn)
@@ -473,9 +491,9 @@ func (ctx *TxParseContext) parseTransactionBody(payload []byte, pos, p0 int, slo
 		p = dataPos + dataLen
 	}
 	if slot.Type == BlobTxType {
-		p, err = rlp.U256(payload, p, &slot.DataFeeCap)
+		p, err = rlp.U256(payload, p, &slot.BlobFeeCap)
 		if err != nil {
-			return 0, fmt.Errorf("%w: data fee cap: %s", ErrParseTxn, err) //nolint
+			return 0, fmt.Errorf("%w: blob fee cap: %s", ErrParseTxn, err) //nolint
 		}
 		dataPos, dataLen, err = rlp.List(payload, p)
 		if err != nil {
@@ -916,6 +934,7 @@ func EncodeSenderLengthForStorage(nonce uint64, balance uint256.Int) uint {
 	return structLength
 }
 
+// Encode the details of txn sender into the given "buffer" byte-slice that should be big enough
 func EncodeSender(nonce uint64, balance uint256.Int, buffer []byte) {
 	var fieldSet = 0 // start with first bit set to 0
 	var pos = 1
@@ -943,6 +962,8 @@ func EncodeSender(nonce uint64, balance uint256.Int, buffer []byte) {
 
 	buffer[0] = byte(fieldSet)
 }
+
+// Decode the sender's balance and nonce from encoded byte-slice
 func DecodeSender(enc []byte) (nonce uint64, balance uint256.Int, err error) {
 	if len(enc) == 0 {
 		return

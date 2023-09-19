@@ -18,6 +18,7 @@ package txpool
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -191,12 +192,7 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 				time.Sleep(3 * time.Second)
 				continue
 			}
-
-			if rlp.IsRLPError(err) {
-				f.logger.Debug("[txpool.fetch] Handling incoming message", "msg", req.Id.String(), "err", err)
-			} else {
-				f.logger.Warn("[txpool.fetch] Handling incoming message", "msg", req.Id.String(), "err", err)
-			}
+			f.logger.Debug("[txpool.fetch] Handling incoming message", "msg", req.Id.String(), "err", err)
 		}
 		if f.wg != nil {
 			f.wg.Done()
@@ -226,20 +222,15 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		if err != nil {
 			return fmt.Errorf("parsing NewPooledTransactionHashes: %w", err)
 		}
-		var hashbuf [32]byte
-		var unknownHashes types2.Hashes
-		for i := 0; i < hashCount; i++ {
-			_, pos, err = types2.ParseHash(req.Data, pos, hashbuf[:0])
-			if err != nil {
-				return fmt.Errorf("parsing NewPooledTransactionHashes: %w", err)
-			}
-			known, err := f.pool.IdHashKnown(tx, hashbuf[:])
-			if err != nil {
+		hashes := make([]byte, 32*hashCount)
+		for i := 0; i < len(hashes); i += 32 {
+			if _, pos, err = types2.ParseHash(req.Data, pos, hashes[i:]); err != nil {
 				return err
 			}
-			if !known {
-				unknownHashes = append(unknownHashes, hashbuf[:]...)
-			}
+		}
+		unknownHashes, err := f.pool.FilterKnownIdHashes(tx, hashes)
+		if err != nil {
+			return err
 		}
 		if len(unknownHashes) > 0 {
 			var encodedRequest []byte
@@ -260,16 +251,11 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		if err != nil {
 			return fmt.Errorf("parsing NewPooledTransactionHashes88: %w", err)
 		}
-		var unknownHashes types2.Hashes
-		for i := 0; i < len(hashes); i += 32 {
-			known, err := f.pool.IdHashKnown(tx, hashes[i:i+32])
-			if err != nil {
-				return err
-			}
-			if !known {
-				unknownHashes = append(unknownHashes, hashes[i:i+32]...)
-			}
+		unknownHashes, err := f.pool.FilterKnownIdHashes(tx, hashes)
+		if err != nil {
+			return err
 		}
+
 		if len(unknownHashes) > 0 {
 			var encodedRequest []byte
 			var messageID sentry.MessageId
@@ -288,30 +274,24 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		//TODO: handleInboundMessage is single-threaded - means it can accept as argument couple buffers (or analog of txParseContext). Protobuf encoding will copy data anyway, but DirectClient doesn't
 		var encodedRequest []byte
 		var messageID sentry.MessageId
-		switch req.Id {
-		case sentry.MessageId_GET_POOLED_TRANSACTIONS_66:
-			messageID = sentry.MessageId_POOLED_TRANSACTIONS_66
-			requestID, hashes, _, err := types2.ParseGetPooledTransactions66(req.Data, 0, nil)
+		messageID = sentry.MessageId_POOLED_TRANSACTIONS_66
+		requestID, hashes, _, err := types2.ParseGetPooledTransactions66(req.Data, 0, nil)
+		if err != nil {
+			return err
+		}
+		_ = requestID
+		var txs [][]byte
+		for i := 0; i < len(hashes); i += 32 {
+			txn, err := f.pool.GetRlp(tx, hashes[i:i+32])
 			if err != nil {
 				return err
 			}
-			_ = requestID
-			var txs [][]byte
-			for i := 0; i < len(hashes); i += 32 {
-				txn, err := f.pool.GetRlp(tx, hashes[i:i+32])
-				if err != nil {
-					return err
-				}
-				if txn == nil {
-					continue
-				}
-				txs = append(txs, txn)
+			if txn == nil {
+				continue
 			}
-
-			encodedRequest = types2.EncodePooledTransactions66(txs, requestID, nil)
-		default:
-			return fmt.Errorf("unexpected message: %s", req.Id.String())
+			txs = append(txs, txn)
 		}
+		encodedRequest = types2.EncodePooledTransactions66(txs, requestID, nil)
 
 		if _, err := sentryClient.SendMessageById(f.ctx, &sentry.SendMessageByIdRequest{
 			Data:   &sentry.OutboundMessageData{Id: messageID, Data: encodedRequest},
@@ -456,6 +436,11 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 	if err != nil {
 		return err
 	}
+	tx, err := f.db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	for req, err := stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
 			return err
@@ -473,7 +458,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 					if err = f.threadSafeParseStateChangeTxn(func(parseContext *types2.TxParseContext) error {
 						_, err := parseContext.ParseTransaction(change.Txs[i], 0, minedTxs.Txs[i], minedTxs.Senders.At(i), false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
 						return err
-					}); err != nil {
+					}); err != nil && !errors.Is(err, context.Canceled) {
 						f.logger.Warn("stream.Recv", "err", err)
 						continue
 					}
@@ -485,8 +470,17 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 					unwindTxs.Txs[i] = &types2.TxSlot{}
 					if err = f.threadSafeParseStateChangeTxn(func(parseContext *types2.TxParseContext) error {
 						_, err = parseContext.ParseTransaction(change.Txs[i], 0, unwindTxs.Txs[i], unwindTxs.Senders.At(i), false /* hasEnvelope */, false /* wrappedWithBlobs */, nil)
+						if unwindTxs.Txs[i].Type == types2.BlobTxType {
+							knownBlobTxn, err := f.pool.GetKnownBlobTxn(tx, unwindTxs.Txs[i].IDHash[:])
+							if err != nil {
+								return err
+							}
+							if knownBlobTxn != nil {
+								unwindTxs.Txs[i] = knownBlobTxn.Tx
+							}
+						}
 						return err
-					}); err != nil {
+					}); err != nil && !errors.Is(err, context.Canceled) {
 						f.logger.Warn("stream.Recv", "err", err)
 						continue
 					}
@@ -497,7 +491,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 		// unwrapped version here (we would need to re-wrap the tx with its blobs & kzg commitments).
 		if err := f.db.View(ctx, func(tx kv.Tx) error {
 			return f.pool.OnNewBlock(ctx, req, unwindTxs, minedTxs, tx)
-		}); err != nil {
+		}); err != nil && !errors.Is(err, context.Canceled) {
 			f.logger.Warn("onNewBlock", "err", err)
 		}
 		if f.wg != nil {
@@ -505,3 +499,21 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 		}
 	}
 }
+
+// func (f *Fetch) requestUnknownTxs(unknownHashes types2.Hashes, sentryClient sentry.SentryClient, PeerId *types.H512) error{
+// 	if len(unknownHashes) > 0 {
+// 		var encodedRequest []byte
+// 		var err error
+// 		var messageID sentry.MessageId
+// 		if encodedRequest, err = types2.EncodeGetPooledTransactions66(unknownHashes, uint64(1), nil); err != nil {
+// 			return err
+// 		}
+// 		messageID = sentry.MessageId_GET_POOLED_TRANSACTIONS_66
+// 		if _, err := sentryClient.SendMessageById(f.ctx, &sentry.SendMessageByIdRequest{
+// 			Data:   &sentry.OutboundMessageData{Id: messageID, Data: encodedRequest},
+// 			PeerId: PeerId,
+// 		}, &grpc.EmptyCallOption{}); err != nil {
+// 			return err
+// 		}
+// 	}
+// }

@@ -17,8 +17,10 @@
 package snaptype
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/anacrolix/torrent/metainfo"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -34,6 +36,8 @@ const (
 	Headers Type = iota
 	Bodies
 	Transactions
+	BorEvents
+	BorSpans
 	NumberOfTypes
 )
 
@@ -45,6 +49,10 @@ func (ft Type) String() string {
 		return "bodies"
 	case Transactions:
 		return "transactions"
+	case BorEvents:
+		return "borevents"
+	case BorSpans:
+		return "borspans"
 	default:
 		panic(fmt.Sprintf("unknown file type: %d", ft))
 	}
@@ -58,6 +66,10 @@ func ParseFileType(s string) (Type, bool) {
 		return Bodies, true
 	case "transactions":
 		return Transactions, true
+	case "borevents":
+		return BorEvents, true
+	case "borspans":
+		return BorSpans, true
 	default:
 		return NumberOfTypes, false
 	}
@@ -111,16 +123,15 @@ func IsCorrectHistoryFileName(name string) bool {
 	return len(parts) == 3
 }
 
-func ParseFileName(dir, fileName string) (res FileInfo, err error) {
+func ParseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	ext := filepath.Ext(fileName)
 	onlyName := fileName[:len(fileName)-len(ext)]
 	parts := strings.Split(onlyName, "-")
 	if len(parts) < 4 {
-		return res, fmt.Errorf("expected format: v1-001500-002000-bodies.seg got: %s. %w", fileName, ErrInvalidFileName)
+		return res, ok
 	}
-	if parts[0] != "v1" {
-		return res, fmt.Errorf("version: %s. %w", parts[0], ErrInvalidFileName)
-	}
+	version := parts[0]
+	_ = version
 	from, err := strconv.ParseUint(parts[1], 10, 64)
 	if err != nil {
 		return
@@ -129,22 +140,11 @@ func ParseFileName(dir, fileName string) (res FileInfo, err error) {
 	if err != nil {
 		return
 	}
-	var snapshotType Type
 	ft, ok := ParseFileType(parts[3])
 	if !ok {
-		return res, fmt.Errorf("unexpected snapshot suffix: %s,%w", parts[2], ErrInvalidFileName)
+		return res, ok
 	}
-	switch ft {
-	case Headers:
-		snapshotType = Headers
-	case Bodies:
-		snapshotType = Bodies
-	case Transactions:
-		snapshotType = Transactions
-	default:
-		return res, fmt.Errorf("unexpected snapshot suffix: %s,%w", parts[2], ErrInvalidFileName)
-	}
-	return FileInfo{From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), T: snapshotType, Ext: ext}, nil
+	return FileInfo{From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), T: ft, Ext: ext}, ok
 }
 
 const Erigon3SeedableSteps = 32
@@ -203,12 +203,9 @@ func ParseDir(dir string) (res []FileInfo, err error) {
 			continue
 		}
 
-		meta, err := ParseFileName(dir, f.Name())
-		if err != nil {
-			if errors.Is(err, ErrInvalidFileName) {
-				continue
-			}
-			return nil, err
+		meta, ok := ParseFileName(dir, f.Name())
+		if !ok {
+			continue
 		}
 		res = append(res, meta)
 	}
@@ -229,4 +226,13 @@ func ParseDir(dir string) (res []FileInfo, err error) {
 	})
 
 	return res, nil
+}
+
+func Hex2InfoHash(in string) (infoHash metainfo.Hash) {
+	inHex, err := hex.DecodeString(in)
+	if err != nil {
+		panic(err)
+	}
+	copy(infoHash[:], inHex)
+	return infoHash
 }

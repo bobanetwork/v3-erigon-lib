@@ -22,42 +22,59 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type ExecutionClientDirect struct {
 	server execution.ExecutionServer
 }
 
-func NewExecutionClientDirect(server execution.ExecutionServer) *ExecutionClientDirect {
+func NewExecutionClientDirect(server execution.ExecutionServer) execution.ExecutionClient {
 	return &ExecutionClientDirect{server: server}
 }
 
-func (s *ExecutionClientDirect) AssembleBlock(ctx context.Context, in *execution.EmptyMessage, opts ...grpc.CallOption) (*types.ExecutionPayload, error) {
+func (s *ExecutionClientDirect) AssembleBlock(ctx context.Context, in *execution.AssembleBlockRequest, opts ...grpc.CallOption) (*execution.AssembleBlockResponse, error) {
 	return s.server.AssembleBlock(ctx, in)
 }
 
-// Chain Putters.
-func (s *ExecutionClientDirect) InsertHeaders(ctx context.Context, in *execution.InsertHeadersRequest, opts ...grpc.CallOption) (*execution.EmptyMessage, error) {
-	return s.server.InsertHeaders(ctx, in)
+func (s *ExecutionClientDirect) GetBodiesByHashes(ctx context.Context, in *execution.GetBodiesByHashesRequest, opts ...grpc.CallOption) (*execution.GetBodiesBatchResponse, error) {
+	return s.server.GetBodiesByHashes(ctx, in)
 }
 
-func (s *ExecutionClientDirect) InsertBodies(ctx context.Context, in *execution.InsertBodiesRequest, opts ...grpc.CallOption) (*execution.EmptyMessage, error) {
-	return s.server.InsertBodies(ctx, in)
+func (s *ExecutionClientDirect) GetBodiesByRange(ctx context.Context, in *execution.GetBodiesByRangeRequest, opts ...grpc.CallOption) (*execution.GetBodiesBatchResponse, error) {
+	return s.server.GetBodiesByRange(ctx, in)
+}
+
+func (s *ExecutionClientDirect) GetAssembledBlock(ctx context.Context, in *execution.GetAssembledBlockRequest, opts ...grpc.CallOption) (*execution.GetAssembledBlockResponse, error) {
+	return s.server.GetAssembledBlock(ctx, in)
+}
+
+// Chain Putters.
+func (s *ExecutionClientDirect) InsertBlocks(ctx context.Context, in *execution.InsertBlocksRequest, opts ...grpc.CallOption) (*execution.InsertionResult, error) {
+	return s.server.InsertBlocks(ctx, in)
 }
 
 // Chain Validation and ForkChoice.
-func (s *ExecutionClientDirect) ValidateChain(ctx context.Context, in *types.H256, opts ...grpc.CallOption) (*execution.ValidationReceipt, error) {
+func (s *ExecutionClientDirect) ValidateChain(ctx context.Context, in *execution.ValidationRequest, opts ...grpc.CallOption) (*execution.ValidationReceipt, error) {
 	return s.server.ValidateChain(ctx, in)
 
 }
 
-func (s *ExecutionClientDirect) UpdateForkChoice(ctx context.Context, in *types.H256, opts ...grpc.CallOption) (*execution.ForkChoiceReceipt, error) {
+func (s *ExecutionClientDirect) UpdateForkChoice(ctx context.Context, in *execution.ForkChoice, opts ...grpc.CallOption) (*execution.ForkChoiceReceipt, error) {
 	return s.server.UpdateForkChoice(ctx, in)
 }
 
 // Chain Getters.
 func (s *ExecutionClientDirect) GetHeader(ctx context.Context, in *execution.GetSegmentRequest, opts ...grpc.CallOption) (*execution.GetHeaderResponse, error) {
 	return s.server.GetHeader(ctx, in)
+}
+
+func (s *ExecutionClientDirect) CurrentHeader(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*execution.GetHeaderResponse, error) {
+	return s.server.CurrentHeader(ctx, in)
+}
+
+func (s *ExecutionClientDirect) GetTD(ctx context.Context, in *execution.GetSegmentRequest, opts ...grpc.CallOption) (*execution.GetTDResponse, error) {
+	return s.server.GetTD(ctx, in)
 }
 
 func (s *ExecutionClientDirect) GetBody(ctx context.Context, in *execution.GetSegmentRequest, opts ...grpc.CallOption) (*execution.GetBodyResponse, error) {
@@ -70,4 +87,12 @@ func (s *ExecutionClientDirect) IsCanonicalHash(ctx context.Context, in *types.H
 
 func (s *ExecutionClientDirect) GetHeaderHashNumber(ctx context.Context, in *types.H256, opts ...grpc.CallOption) (*execution.GetHeaderHashNumberResponse, error) {
 	return s.server.GetHeaderHashNumber(ctx, in)
+}
+
+func (s *ExecutionClientDirect) GetForkChoice(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*execution.ForkChoice, error) {
+	return s.server.GetForkChoice(ctx, in)
+}
+
+func (s *ExecutionClientDirect) Ready(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*execution.ReadyResponse, error) {
+	return s.server.Ready(ctx, in)
 }

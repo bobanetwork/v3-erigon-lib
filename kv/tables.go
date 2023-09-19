@@ -357,9 +357,13 @@ const (
 
 	// BOR
 
-	BorReceipts = "BorReceipt"
-	BorTxLookup = "BlockBorTransactionLookup" // transaction_hash -> block_num_u64
-	BorSeparate = "BorSeparate"
+	BorReceipts  = "BorReceipt"
+	BorFinality  = "BorFinality"
+	BorTxLookup  = "BlockBorTransactionLookup" // transaction_hash -> block_num_u64
+	BorSeparate  = "BorSeparate"               // persisted snapshots of the Validator Sets, with their proposer priorities
+	BorEvents    = "BorEvents"                 // event_id -> event_payload
+	BorEventNums = "BorEventNums"              // block_num -> event_id (first event_id in that block)
+	BorSpans     = "BorSpans"                  // span_id -> span (in JSON encoding)
 
 	// Downloader
 	BittorrentCompletion = "BittorrentCompletion"
@@ -528,8 +532,12 @@ var ChaindataTables = []string{
 	StateCode,
 	StateCommitment,
 	BorReceipts,
+	BorFinality,
 	BorTxLookup,
 	BorSeparate,
+	BorEvents,
+	BorEventNums,
+	BorSpans,
 	TblAccountKeys,
 	TblAccountVals,
 	TblAccountHistoryKeys,
@@ -718,7 +726,7 @@ func TablesCfgByLabel(label Label) TableCfg {
 	case DownloaderDB:
 		return DownloaderTablesCfg
 	default:
-		panic(fmt.Sprintf("unexpected label"))
+		panic(fmt.Sprintf("unexpected label: %s", label))
 	}
 }
 func sortBuckets() {

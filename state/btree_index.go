@@ -16,6 +16,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common/background"
@@ -873,7 +874,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 			return err
 		}
 
-		pos = getter.Skip()
+		pos, _ = getter.Skip()
 		if pos-kp == 1 {
 			ks[len(key)]++
 			emptys++
@@ -922,7 +923,7 @@ func BuildBtreeIndex(dataPath, indexPath string, logger log.Logger) error {
 			return err
 		}
 
-		pos = getter.Skip()
+		pos, _ = getter.Skip()
 	}
 	decomp.Close()
 
@@ -1089,10 +1090,11 @@ func (b *BtIndex) Close() {
 	}
 	if b.file != nil {
 		if err := b.m.Unmap(); err != nil {
-			_ = err
+			log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", b.FileName(), "stack", dbg.Stack())
 		}
+		b.m = nil
 		if err := b.file.Close(); err != nil {
-			_ = err
+			log.Log(dbg.FileCloseLogLevel, "close", "err", err, "file", b.FileName(), "stack", dbg.Stack())
 		}
 		b.file = nil
 	}

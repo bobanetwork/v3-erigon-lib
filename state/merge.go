@@ -979,14 +979,14 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 						return nil, nil, err
 					}
 					if h.compressVals {
-						valOffset = g2.Skip()
+						valOffset, _ = g2.Skip()
 					} else {
-						valOffset = g2.SkipUncompressed()
+						valOffset, _ = g2.SkipUncompressed()
 					}
 				}
 				p.Processed.Add(1)
 			}
-			if err = rs.Build(); err != nil {
+			if err = rs.Build(ctx); err != nil {
 				if rs.Collision() {
 					log.Info("Building recsplit. Collision happened. It's ok. Restarting...")
 					rs.ResetNextSalt()

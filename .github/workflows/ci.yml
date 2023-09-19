@@ -51,7 +51,12 @@ jobs:
         if: matrix.os == 'ubuntu-20.04'
         uses: golangci/golangci-lint-action@v3
         with:
-          version: v1.53
+          version: v1.54
+          skip-build-cache: true
+
+      - name: Lint source code licenses
+        if: matrix.os == 'ubuntu-20.04'
+        run: make lint-licenses-deps lint-licenses
 
       - name: Test win
         if: matrix.os == 'windows-2022'
