@@ -18,7 +18,6 @@ package downloader
 
 import (
 	"context"
-	//nolint:gosec
 	"fmt"
 	"net"
 	"os"
@@ -26,7 +25,6 @@ import (
 	"regexp"
 	"runtime"
 	"strconv"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -35,22 +33,36 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon-lib/downloader/trackers"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
-
-	"golang.org/x/sync/semaphore"
+	"golang.org/x/sync/errgroup"
 )
+
+// udpOrHttpTrackers - torrent library spawning several goroutines and producing many requests for each tracker. So we limit amout of trackers by 7
+var udpOrHttpTrackers = []string{
+	"udp://tracker.opentrackr.org:1337/announce",
+	"udp://9.rarbg.com:2810/announce",
+	"udp://tracker.openbittorrent.com:6969/announce",
+	"http://tracker.openbittorrent.com:80/announce",
+	"udp://opentracker.i2p.rocks:6969/announce",
+	"https://opentracker.i2p.rocks:443/announce",
+	"udp://tracker.torrent.eu.org:451/announce",
+	"udp://tracker.moeking.me:6969/announce",
+}
+
+// nolint
+var websocketTrackers = []string{
+	"wss://tracker.btorrent.xyz",
+}
 
 // Trackers - break down by priority tier
 var Trackers = [][]string{
-	trackers.First(7, trackers.Best),
-	//trackers.First(3, trackers.Udp),
-	//trackers.First(3, trackers.Https),
-	//trackers.First(10, trackers.Ws),
+	udpOrHttpTrackers,
+	//websocketTrackers // TODO: Ws protocol producing too many errors and flooding logs. But it's also very fast and reactive.
 }
 
 func AllTorrentPaths(dir string) ([]string, error) {
@@ -113,19 +125,12 @@ func seedableSegmentFiles(dir string) ([]string, error) {
 		if !snaptype.IsCorrectFileName(f.Name()) {
 			continue
 		}
-		fileInfo, err := f.Info()
-		if err != nil {
-			return nil, err
-		}
-		if fileInfo.Size() == 0 {
-			continue
-		}
 		if filepath.Ext(f.Name()) != ".seg" { // filter out only compressed files
 			continue
 		}
-		ff, err := snaptype.ParseFileName(dir, f.Name())
-		if err != nil {
-			return nil, fmt.Errorf("ParseFileName: %w", err)
+		ff, ok := snaptype.ParseFileName(dir, f.Name())
+		if !ok {
+			continue
 		}
 		if !ff.Seedable() {
 			continue
@@ -135,10 +140,22 @@ func seedableSegmentFiles(dir string) ([]string, error) {
 	return res, nil
 }
 
-var historyFileRegex = regexp.MustCompile("^([[:lower:]]+).([0-9]+)-([0-9]+).(v|ef)$")
+var historyFileRegex = regexp.MustCompile("^([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
 
-func seedableHistorySnapshots(dir string) ([]string, error) {
-	historyDir := filepath.Join(dir, "history")
+func seedableHistorySnapshots(dir, subDir string) ([]string, error) {
+	l, err := seedableSnapshotsBySubDir(dir, "history")
+	if err != nil {
+		return nil, err
+	}
+	l2, err := seedableSnapshotsBySubDir(dir, "warm")
+	if err != nil {
+		return nil, err
+	}
+	return append(l, l2...), nil
+}
+
+func seedableSnapshotsBySubDir(dir, subDir string) ([]string, error) {
+	historyDir := filepath.Join(dir, subDir)
 	dir2.MustExist(historyDir)
 	files, err := os.ReadDir(historyDir)
 	if err != nil {
@@ -152,13 +169,6 @@ func seedableHistorySnapshots(dir string) ([]string, error) {
 		if !f.Type().IsRegular() {
 			continue
 		}
-		fileInfo, err := f.Info()
-		if err != nil {
-			return nil, err
-		}
-		if fileInfo.Size() == 0 {
-			continue
-		}
 		ext := filepath.Ext(f.Name())
 		if ext != ".v" && ext != ".ef" { // filter out only compressed files
 			continue
@@ -168,7 +178,7 @@ func seedableHistorySnapshots(dir string) ([]string, error) {
 		if len(subs) != 5 {
 			continue
 		}
-
+		// Check that it's seedable
 		from, err := strconv.ParseUint(subs[2], 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("ParseFileName: %w", err)
@@ -177,39 +187,57 @@ func seedableHistorySnapshots(dir string) ([]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("ParseFileName: %w", err)
 		}
-		if to-from != snaptype.Erigon3SeedableSteps {
+		if (to-from)%snaptype.Erigon3SeedableSteps != 0 {
 			continue
 		}
-		res = append(res, filepath.Join("history", f.Name()))
+		res = append(res, filepath.Join(subDir, f.Name()))
 	}
 	return res, nil
 }
 
-func buildTorrentIfNeed(fName, root string) (err error) {
+func ensureCantLeaveDir(fName, root string) (string, error) {
+	if filepath.IsAbs(fName) {
+		newFName, err := filepath.Rel(root, fName)
+		if err != nil {
+			return fName, err
+		}
+		if !IsLocal(newFName) {
+			return fName, fmt.Errorf("file=%s, is outside of snapshots dir", fName)
+		}
+		fName = newFName
+	}
+	if !IsLocal(fName) {
+		return fName, fmt.Errorf("relative paths are not allowed: %s", fName)
+	}
+	return fName, nil
+}
+
+func BuildTorrentIfNeed(ctx context.Context, fName, root string) (torrentFilePath string, err error) {
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	default:
+	}
+	fName, err = ensureCantLeaveDir(fName, root)
+	if err != nil {
+		return "", err
+	}
+
 	fPath := filepath.Join(root, fName)
 	if dir2.FileExist(fPath + ".torrent") {
 		return
 	}
+	if !dir2.FileExist(fPath) {
+		return
+	}
+
 	info := &metainfo.Info{PieceLength: downloadercfg.DefaultPieceSize, Name: fName}
 	if err := info.BuildFromFilePath(fPath); err != nil {
-		return fmt.Errorf("createTorrentFileFromSegment: %w", err)
+		return "", fmt.Errorf("createTorrentFileFromSegment: %w", err)
 	}
 	info.Name = fName
 
-	return createTorrentFileFromInfo(root, info, nil)
-}
-
-// AddSegment - add existing .seg file, create corresponding .torrent if need
-func AddSegment(originalFileName, snapDir string, client *torrent.Client) (bool, error) {
-	fPath := filepath.Join(snapDir, originalFileName)
-	if !dir2.FileExist(fPath + ".torrent") {
-		return false, nil
-	}
-	_, err := AddTorrentFile(fPath+".torrent", client)
-	if err != nil {
-		return false, fmt.Errorf("AddTorrentFile: %w", err)
-	}
-	return true, nil
+	return fPath + ".torrent", CreateTorrentFileFromInfo(root, info, nil)
 }
 
 // BuildTorrentFilesIfNeed - create .torrent files from .seg files (big IO) - if .seg files were added manually
@@ -217,51 +245,39 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) ([]string, err
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	files, err := seedableSegmentFiles(snapDir)
+	files, err := seedableFiles(snapDir)
 	if err != nil {
 		return nil, err
 	}
-	files2, err := seedableHistorySnapshots(snapDir)
-	if err != nil {
-		return nil, err
-	}
-	files = append(files, files2...)
 
-	errs := make(chan error, len(files)*2)
-	wg := &sync.WaitGroup{}
-	workers := cmp.Max(1, runtime.GOMAXPROCS(-1)-1) * 2
-	var sem = semaphore.NewWeighted(int64(workers))
-	i := atomic.Int32{}
-	for _, f := range files {
-		wg.Add(1)
-		if err := sem.Acquire(ctx, 1); err != nil {
-			return nil, err
-		}
-		go func(f string) {
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(cmp.Max(1, runtime.GOMAXPROCS(-1)-1) * 4)
+	var i atomic.Int32
+
+	for _, file := range files {
+		file := file
+		g.Go(func() error {
 			defer i.Add(1)
-			defer sem.Release(1)
-			defer wg.Done()
-			if err := buildTorrentIfNeed(f, snapDir); err != nil {
-				errs <- err
+			if _, err := BuildTorrentIfNeed(ctx, file, snapDir); err != nil {
+				return err
 			}
-
-			select {
-			default:
-			case <-ctx.Done():
-				errs <- ctx.Err()
-			case <-logEvery.C:
-				log.Info("[snapshots] Creating .torrent files", "Progress", fmt.Sprintf("%d/%d", i.Load(), len(files)))
-			}
-		}(f)
+			return nil
+		})
 	}
-	go func() {
-		wg.Wait()
-		close(errs)
-	}()
-	for err := range errs {
-		if err != nil {
-			return nil, err
+
+	var m runtime.MemStats
+Loop:
+	for int(i.Load()) < len(files) {
+		select {
+		case <-ctx.Done():
+			break Loop // g.Wait() will return right error
+		case <-logEvery.C:
+			dbg.ReadMemStats(&m)
+			log.Info("[snapshots] Creating .torrent files", "progress", fmt.Sprintf("%d/%d", i.Load(), len(files)), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 		}
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
 	return files, nil
 }
@@ -271,17 +287,17 @@ func CreateTorrentFileIfNotExists(root string, info *metainfo.Info, mi *metainfo
 	if dir2.FileExist(fPath + ".torrent") {
 		return nil
 	}
-	if err := createTorrentFileFromInfo(root, info, mi); err != nil {
+	if err := CreateTorrentFileFromInfo(root, info, mi); err != nil {
 		return err
 	}
 	return nil
 }
 
-func createTorrentFileFromInfo(root string, info *metainfo.Info, mi *metainfo.MetaInfo) error {
+func CreateMetaInfo(info *metainfo.Info, mi *metainfo.MetaInfo) (*metainfo.MetaInfo, error) {
 	if mi == nil {
 		infoBytes, err := bencode.Marshal(info)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		mi = &metainfo.MetaInfo{
 			CreationDate: time.Now().Unix(),
@@ -292,8 +308,10 @@ func createTorrentFileFromInfo(root string, info *metainfo.Info, mi *metainfo.Me
 	} else {
 		mi.AnnounceList = Trackers
 	}
+	return mi, nil
+}
+func CreateTorrentFromMetaInfo(root string, info *metainfo.Info, mi *metainfo.MetaInfo) error {
 	torrentFileName := filepath.Join(root, info.Name+".torrent")
-
 	file, err := os.Create(torrentFileName)
 	if err != nil {
 		return err
@@ -305,28 +323,82 @@ func createTorrentFileFromInfo(root string, info *metainfo.Info, mi *metainfo.Me
 	file.Sync()
 	return nil
 }
-
-// nolint
-func segmentFileNameFromTorrentFileName(in string) string {
-	ext := filepath.Ext(in)
-	return in[0 : len(in)-len(ext)]
+func CreateTorrentFileFromInfo(root string, info *metainfo.Info, mi *metainfo.MetaInfo) (err error) {
+	mi, err = CreateMetaInfo(info, mi)
+	if err != nil {
+		return err
+	}
+	return CreateTorrentFromMetaInfo(root, info, mi)
 }
 
-// AddTorrentFile - adding .torrent file to torrentClient (and checking their hashes), if .torrent file
+func AddTorrentFiles(snapDir string, torrentClient *torrent.Client) error {
+	files, err := allTorrentFiles(snapDir)
+	if err != nil {
+		return err
+	}
+	for _, ts := range files {
+		_, err := addTorrentFile(ts, torrentClient)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func allTorrentFiles(snapDir string) (res []*torrent.TorrentSpec, err error) {
+	res, err = torrentInDir(snapDir)
+	if err != nil {
+		return nil, err
+	}
+	res2, err := torrentInDir(filepath.Join(snapDir, "history"))
+	if err != nil {
+		return nil, err
+	}
+	res = append(res, res2...)
+	res2, err = torrentInDir(filepath.Join(snapDir, "warm"))
+	if err != nil {
+		return nil, err
+	}
+	res = append(res, res2...)
+	return res, nil
+}
+func torrentInDir(snapDir string) (res []*torrent.TorrentSpec, err error) {
+	files, err := os.ReadDir(snapDir)
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range files {
+		if f.IsDir() || !f.Type().IsRegular() {
+			continue
+		}
+		if filepath.Ext(f.Name()) != ".torrent" { // filter out only compressed files
+			continue
+		}
+
+		a, err := loadTorrent(filepath.Join(snapDir, f.Name()))
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, a)
+	}
+	return res, nil
+}
+
+func loadTorrent(torrentFilePath string) (*torrent.TorrentSpec, error) {
+	mi, err := metainfo.LoadFromFile(torrentFilePath)
+	if err != nil {
+		return nil, fmt.Errorf("LoadFromFile: %w, file=%s", err, torrentFilePath)
+	}
+	mi.AnnounceList = Trackers
+	return torrent.TorrentSpecFromMetaInfoErr(mi)
+}
+
+// addTorrentFile - adding .torrent file to torrentClient (and checking their hashes), if .torrent file
 // added first time - pieces verification process will start (disk IO heavy) - Progress
 // kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
 // Don't need call torrent.VerifyData manually
-func AddTorrentFile(torrentFilePath string, torrentClient *torrent.Client) (*torrent.Torrent, error) {
-	mi, err := metainfo.LoadFromFile(torrentFilePath)
-	if err != nil {
-		return nil, err
-	}
-	mi.AnnounceList = Trackers
-	ts, err := torrent.TorrentSpecFromMetaInfoErr(mi)
-	if err != nil {
-		return nil, err
-	}
-
+func addTorrentFile(ts *torrent.TorrentSpec, torrentClient *torrent.Client) (*torrent.Torrent, error) {
 	if _, ok := torrentClient.Torrent(ts.InfoHash); !ok { // can set ChunkSize only for new torrents
 		ts.ChunkSize = downloadercfg.DefaultNetworkChunkSize
 	} else {
@@ -336,7 +408,7 @@ func AddTorrentFile(torrentFilePath string, torrentClient *torrent.Client) (*tor
 	ts.DisallowDataDownload = true
 	t, _, err := torrentClient.AddTorrentSpec(ts)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
 	}
 
 	t.DisallowDataDownload()
@@ -386,4 +458,9 @@ func readPeerID(db kv.RoDB) (peerID []byte, err error) {
 		return nil, err
 	}
 	return peerID, nil
+}
+
+// Deprecated: use `filepath.IsLocal` after drop go1.19 support
+func IsLocal(path string) bool {
+	return isLocal(path)
 }

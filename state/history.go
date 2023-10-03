@@ -261,15 +261,11 @@ func (h *History) closeWhatNotInList(fNames []string) {
 	})
 	for _, item := range toDelete {
 		if item.decompressor != nil {
-			if err := item.decompressor.Close(); err != nil {
-				h.logger.Trace("close", "err", err, "file", item.index.FileName())
-			}
+			item.decompressor.Close()
 			item.decompressor = nil
 		}
 		if item.index != nil {
-			if err := item.index.Close(); err != nil {
-				h.logger.Trace("close", "err", err, "file", item.index.FileName())
-			}
+			item.index.Close()
 			item.index = nil
 		}
 		h.files.Delete(item)
@@ -456,15 +452,15 @@ func buildVi(ctx context.Context, historyItem, iiItem *filesItem, historyIdxPath
 					return err
 				}
 				if compressVals {
-					valOffset = g2.Skip()
+					valOffset, _ = g2.Skip()
 				} else {
-					valOffset = g2.SkipUncompressed()
+					valOffset, _ = g2.SkipUncompressed()
 				}
 			}
 
 			p.Processed.Add(1)
 		}
-		if err = rs.Build(); err != nil {
+		if err = rs.Build(ctx); err != nil {
 			if rs.Collision() {
 				logger.Info("Building recsplit. Collision happened. It's ok. Restarting...")
 				rs.ResetNextSalt()
@@ -937,10 +933,10 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 				if err = rs.AddKey(historyKey, valOffset); err != nil {
 					return HistoryFiles{}, fmt.Errorf("add %s history idx [%x]: %w", h.filenameBase, historyKey, err)
 				}
-				valOffset = g.Skip()
+				valOffset, _ = g.Skip()
 			}
 		}
-		if err = rs.Build(); err != nil {
+		if err = rs.Build(ctx); err != nil {
 			if rs.Collision() {
 				log.Info("Building recsplit. Collision happened. It's ok. Restarting...")
 				rs.ResetNextSalt()
